@@ -1,0 +1,163 @@
+import { createWriteStream } from 'node:fs'
+import { readFile, rm } from 'node:fs/promises'
+import { basename } from 'node:path'
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
+import WebSocket from 'ws'
+
+export interface OutputRef {
+  filename: string
+  subfolder: string
+  type: string
+}
+
+export interface ComfyHistoryEntry {
+  status?: { completed?: boolean; status_str?: string; messages?: unknown[] }
+  outputs?: Record<string, Record<string, unknown>>
+}
+
+export interface ComfyWsEvent {
+  type: string
+  data?: any
+}
+
+export interface ComfyClient {
+  isUp(): Promise<boolean>
+  interrupt(): Promise<void>
+  uploadImage(filePath: string): Promise<string>
+  submit(prompt: Record<string, any>, clientId: string): Promise<string>
+  getHistory(promptId: string): Promise<ComfyHistoryEntry | null>
+  /** prompt ids currently queued or executing */
+  getQueuedIds(): Promise<Set<string>>
+  downloadOutput(ref: OutputRef, destPath: string): Promise<void>
+  /** 返回断开函数。连接失败时静默重试由调用方负责。 */
+  connectEvents(clientId: string, onEvent: (e: ComfyWsEvent) => void): () => void
+}
+
+export function extractOutputRefs(entry: ComfyHistoryEntry): OutputRef[] {
+  const refs: OutputRef[] = []
+  for (const nodeOutput of Object.values(entry.outputs ?? {})) {
+    for (const value of Object.values(nodeOutput)) {
+      if (!Array.isArray(value)) continue
+      for (const item of value) {
+        if (
+          item &&
+          typeof item === 'object' &&
+          typeof (item as any).filename === 'string' &&
+          (item as any).type === 'output'
+        ) {
+          refs.push({
+            filename: (item as any).filename,
+            subfolder: (item as any).subfolder ?? '',
+            type: (item as any).type,
+          })
+        }
+      }
+    }
+  }
+  return refs
+}
+
+export function createComfyClient(baseUrl: string): ComfyClient {
+  const http = baseUrl
+  const ws = baseUrl.replace(/^http/, 'ws')
+
+  return {
+    async isUp() {
+      try {
+        const res = await fetch(`${http}/system_stats`, { signal: AbortSignal.timeout(3000) })
+        return res.ok
+      } catch {
+        return false
+      }
+    },
+
+    async interrupt() {
+      await fetch(`${http}/interrupt`, { method: 'POST' })
+    },
+
+    async uploadImage(filePath: string) {
+      const form = new FormData()
+      form.append('image', new Blob([await readFile(filePath)]), basename(filePath))
+      form.append('overwrite', 'true')
+      const res = await fetch(`${http}/upload/image`, { method: 'POST', body: form })
+      if (!res.ok) throw new Error(`upload/image failed: ${res.status} ${await res.text()}`)
+      const body = (await res.json()) as { name: string; subfolder?: string }
+      return body.subfolder ? `${body.subfolder}/${body.name}` : body.name
+    },
+
+    async submit(prompt, clientId) {
+      const res = await fetch(`${http}/prompt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, client_id: clientId }),
+      })
+      if (!res.ok) throw new Error(`comfyui rejected prompt: ${res.status} ${await res.text()}`)
+      const body = (await res.json()) as { prompt_id: string }
+      return body.prompt_id
+    },
+
+    async getHistory(promptId) {
+      const res = await fetch(`${http}/history/${promptId}`)
+      if (!res.ok) throw new Error(`history failed: ${res.status}`)
+      const body = (await res.json()) as Record<string, ComfyHistoryEntry>
+      return body[promptId] ?? null
+    },
+
+    async getQueuedIds() {
+      const res = await fetch(`${http}/queue`)
+      if (!res.ok) throw new Error(`queue failed: ${res.status}`)
+      const body = (await res.json()) as {
+        queue_running: Array<[number, string, ...unknown[]]>
+        queue_pending: Array<[number, string, ...unknown[]]>
+      }
+      const ids = new Set<string>()
+      for (const entry of body.queue_running ?? []) ids.add(entry[1])
+      for (const entry of body.queue_pending ?? []) ids.add(entry[1])
+      return ids
+    },
+
+    async downloadOutput(ref, destPath) {
+      const qs = new URLSearchParams({
+        filename: ref.filename,
+        subfolder: ref.subfolder,
+        type: ref.type,
+      })
+      const res = await fetch(`${http}/view?${qs}`)
+      if (!res.ok || !res.body) throw new Error(`view failed: ${res.status}`)
+      try {
+        await pipeline(Readable.fromWeb(res.body as any), createWriteStream(destPath))
+      } catch (err) {
+        await rm(destPath, { force: true })
+        throw err
+      }
+    },
+
+    connectEvents(clientId, onEvent) {
+      let closed = false
+      let socket: WebSocket | null = null
+      const connect = () => {
+        if (closed) return
+        socket = new WebSocket(`${ws}/ws?clientId=${clientId}`)
+        socket.on('message', (raw, isBinary) => {
+          if (isBinary) return // 忽略 preview 二进制帧
+          try {
+            onEvent(JSON.parse(raw.toString()))
+          } catch {
+            /* 忽略无法解析的帧 */
+          }
+        })
+        const retry = () => {
+          if (!closed) setTimeout(connect, 5000)
+        }
+        socket.on('close', retry)
+        socket.on('error', () => socket?.close())
+      }
+      connect()
+      return () => {
+        closed = true
+        socket?.close()
+      }
+    },
+  }
+}

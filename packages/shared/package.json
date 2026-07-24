@@ -1,0 +1,12 @@
+{
+  "name": "@cwe/shared",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": { "zod": "^4.0.5" },
+  "devDependencies": { "typescript": "^5.8.3", "vitest": "^3.2.4" }
+}
