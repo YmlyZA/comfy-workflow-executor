@@ -117,6 +117,14 @@ export function failJob(db: Db, jobId: number, error: string): void {
     .run()
 }
 
+export function getJob(db: Db, jobId: number): Job | undefined {
+  return db.select().from(jobs).where(eq(jobs.id, jobId)).get()
+}
+
+export function getBatchStatus(db: Db, batchId: number): Batch['status'] | undefined {
+  return db.select({ status: batches.status }).from(batches).where(eq(batches.id, batchId)).get()?.status
+}
+
 export function listRunningJobs(db: Db): Job[] {
   return db.select().from(jobs).where(eq(jobs.status, 'running')).all()
 }

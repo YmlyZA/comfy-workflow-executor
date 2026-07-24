@@ -170,4 +170,48 @@ describe('executor', () => {
     expect(types).toContain('job-updated')
     expect(types).toContain('batch-updated')
   })
+
+  it('emits canceled (not succeeded) when batch canceled mid-run', async () => {
+    const b = seed()
+    const completed = comfy.nextResult!
+    let first = true
+    comfy.getHistory = async (promptId: string) => {
+      if (first) {
+        first = false
+        repo.cancelBatch(db, b.id)
+        return completed
+      }
+      return comfy.history.get(promptId) ?? null
+    }
+    const seen: any[] = []
+    events.on('event', (e) => seen.push(e))
+    await makeExecutor().runPendingOnce()
+
+    const job = repo.getBatchDetail(db, b.id)!.jobs[0]!
+    expect(job.status).toBe('canceled')
+
+    const jobEvents = seen.filter((e) => e.type === 'job-updated' && e.jobId === job.id)
+    expect(jobEvents.some((e) => e.status === 'succeeded')).toBe(false)
+    expect(jobEvents.some((e) => e.status === 'canceled')).toBe(true)
+
+    const batchEvents = seen.filter((e) => e.type === 'batch-updated' && e.batchId === b.id)
+    expect(batchEvents.some((e) => e.status === 'running')).toBe(false)
+    expect(batchEvents.every((e) => e.status === 'canceled')).toBe(true)
+  })
+
+  it('survives transient getHistory errors', async () => {
+    const b = seed()
+    const completed = comfy.nextResult!
+    let first = true
+    comfy.getHistory = async (promptId: string) => {
+      if (first) {
+        first = false
+        throw new Error('ECONNREFUSED')
+      }
+      return comfy.history.get(promptId) ?? completed
+    }
+    await makeExecutor().runPendingOnce()
+    const job = repo.getBatchDetail(db, b.id)!.jobs[0]!
+    expect(job.status).toBe('succeeded')
+  })
 })

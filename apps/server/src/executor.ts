@@ -86,18 +86,18 @@ export class Executor {
     try {
       const outputs = await this.execute(job, template)
       repo.finishJob(this.db, job.id, outputs)
-      this.emit({ type: 'job-updated', jobId: job.id, batchId: job.batchId, status: 'succeeded' })
+      const finalStatus = repo.getJob(this.db, job.id)?.status ?? 'succeeded'
+      this.emit({ type: 'job-updated', jobId: job.id, batchId: job.batchId, status: finalStatus })
     } catch (err) {
       repo.failJob(this.db, job.id, err instanceof Error ? err.message : String(err))
-      this.emit({ type: 'job-updated', jobId: job.id, batchId: job.batchId, status: 'failed' })
+      const finalStatus = repo.getJob(this.db, job.id)?.status ?? 'failed'
+      this.emit({ type: 'job-updated', jobId: job.id, batchId: job.batchId, status: finalStatus })
     } finally {
       this.currentJobId = null
     }
-    if (repo.markBatchCompletedIfDone(this.db, job.batchId)) {
-      this.emit({ type: 'batch-updated', batchId: job.batchId, status: 'completed' })
-    } else {
-      this.emit({ type: 'batch-updated', batchId: job.batchId, status: 'running' })
-    }
+    repo.markBatchCompletedIfDone(this.db, job.batchId)
+    const batchStatus = repo.getBatchStatus(this.db, job.batchId) ?? 'running'
+    this.emit({ type: 'batch-updated', batchId: job.batchId, status: batchStatus })
     return true
   }
 
@@ -118,8 +118,18 @@ export class Executor {
   }
 
   private async waitForHistory(promptId: string): Promise<ComfyHistoryEntry> {
+    let backoff = this.pollMs
     for (;;) {
-      const entry = await this.comfy.getHistory(promptId)
+      let entry: ComfyHistoryEntry | null
+      try {
+        entry = await this.comfy.getHistory(promptId)
+      } catch {
+        // ComfyUI 掉线：等待重连，batch 保持 running 不失败
+        await sleep(backoff)
+        backoff = Math.min(backoff * 2, 30_000)
+        continue
+      }
+      backoff = this.pollMs
       if (entry?.status?.completed) return entry
       if (entry?.status?.status_str === 'error') {
         throw new Error(
