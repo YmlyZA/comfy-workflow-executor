@@ -1,5 +1,5 @@
 import { createWriteStream } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { readFile, rm } from 'node:fs/promises'
 import { basename } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
@@ -110,7 +110,12 @@ export function createComfyClient(baseUrl: string): ComfyClient {
       })
       const res = await fetch(`${http}/view?${qs}`)
       if (!res.ok || !res.body) throw new Error(`view failed: ${res.status}`)
-      await pipeline(Readable.fromWeb(res.body as any), createWriteStream(destPath))
+      try {
+        await pipeline(Readable.fromWeb(res.body as any), createWriteStream(destPath))
+      } catch (err) {
+        await rm(destPath, { force: true })
+        throw err
+      }
     },
 
     connectEvents(clientId, onEvent) {
