@@ -36,6 +36,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
 export function createDb(path: string) {
   const sqlite = new Database(path)
   sqlite.pragma('journal_mode = WAL')
+  sqlite.pragma('foreign_keys = ON')
   sqlite.exec(DDL)
   return drizzle(sqlite, { schema })
 }

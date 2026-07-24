@@ -83,17 +83,18 @@ export function claimNextJob(db: Db): { job: Job; template: Template } | undefin
       .limit(1)
       .get()
     if (!row) return undefined
+    const template = tx.select().from(templates).where(eq(templates.id, row.batch.templateId)).get()
+    if (!template) return undefined
     const job = tx
       .update(jobs)
       .set({ status: 'running', startedAt: now(), error: null })
-      .where(eq(jobs.id, row.job.id))
+      .where(and(eq(jobs.id, row.job.id), eq(jobs.status, 'pending')))
       .returning()
       .get()
+    if (!job) return undefined
     if (row.batch.status === 'pending') {
       tx.update(batches).set({ status: 'running' }).where(eq(batches.id, row.batch.id)).run()
     }
-    const template = tx.select().from(templates).where(eq(templates.id, row.batch.templateId)).get()
-    if (!template) return undefined
     return { job, template }
   })
 }

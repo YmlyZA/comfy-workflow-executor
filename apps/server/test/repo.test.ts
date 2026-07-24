@@ -1,6 +1,8 @@
+import { eq } from 'drizzle-orm'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createDb, type Db } from '../src/db/index.js'
 import * as repo from '../src/db/repo.js'
+import { jobs } from '../src/db/schema.js'
 
 const comfyJson = { '6': { class_type: 'CLIPTextEncode', inputs: { text: 'x' } } }
 const params = [
@@ -26,6 +28,11 @@ describe('templates', () => {
     repo.deleteTemplate(db, t.id)
     expect(repo.listTemplates(db)).toHaveLength(0)
   })
+
+  it('deleteTemplate throws when batches still reference it', () => {
+    const { t } = seedBatch()
+    expect(() => repo.deleteTemplate(db, t.id)).toThrow()
+  })
 })
 
 describe('claimNextJob', () => {
@@ -48,6 +55,17 @@ describe('claimNextJob', () => {
     const { b } = seedBatch()
     repo.cancelBatch(db, b.id)
     expect(repo.claimNextJob(db)).toBeUndefined()
+  })
+
+  it('leaves job pending when template row is gone', () => {
+    const { b } = seedBatch()
+    // Bypass FK enforcement to simulate a dangling template reference, since
+    // foreign_keys=ON now prevents deleteTemplate from doing this normally.
+    // drizzle-orm's better-sqlite3 driver exposes the raw Database as $client.
+    ;(db as any).$client.exec('PRAGMA foreign_keys=OFF; DELETE FROM templates; PRAGMA foreign_keys=ON')
+    expect(repo.claimNextJob(db)).toBeUndefined()
+    const rows = db.select().from(jobs).where(eq(jobs.batchId, b.id)).all()
+    expect(rows.every((j) => j.status === 'pending')).toBe(true)
   })
 })
 
