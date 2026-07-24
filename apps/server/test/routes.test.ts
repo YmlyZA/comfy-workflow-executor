@@ -53,6 +53,19 @@ describe('templates routes', () => {
     list = (await (await app.request('/api/templates', { headers: H })).json()) as any[]
     expect(list).toHaveLength(0)
   })
+
+  it('DELETE returns 409 when template has batches', async () => {
+    const t = await createTemplate()
+    const create = await app.request(`/api/templates/${t.id}/batches`, {
+      method: 'POST',
+      headers: H,
+      body: JSON.stringify({ name: 'B', jobs: [{ prompt: 'a' }] }),
+    })
+    expect(create.status).toBe(201)
+    const res = await app.request(`/api/templates/${t.id}`, { method: 'DELETE', headers: H })
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'template has batches' })
+  })
 })
 
 describe('batches routes', () => {
