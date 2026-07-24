@@ -115,10 +115,26 @@ export function convertGraphToApi(
     const def = objectInfo[node.type]!
     const inputs: Record<string, unknown> = {}
 
+    // Collect widgets converted to inputs (new frontend omits them from widgets_values)
+    const converted = new Set(
+      (node.inputs ?? [])
+        .filter((inp) => inp.widget?.name)
+        .map((inp) => inp.widget!.name)
+    )
+
+    const slots = widgetSlots(def)
+    const fullLen = slots.reduce((a, s) => a + (s.extraSlot ? 2 : 1), 0)
+    // New frontend (2025-04+): omits converted widgets from array; length < fullLen detects this
+    const skipConverted = converted.size > 0 && node.widgets_values instanceof Array && node.widgets_values.length < fullLen
+
     const wv = node.widgets_values
     if (Array.isArray(wv)) {
       let i = 0
-      for (const w of widgetSlots(def)) {
+      for (const w of slots) {
+        // Skip converted widgets in new frontend behavior (don't advance i, don't write)
+        if (skipConverted && converted.has(w.name)) {
+          continue
+        }
         if (i >= wv.length) break
         inputs[w.name] = wv[i]
         i += w.extraSlot ? 2 : 1

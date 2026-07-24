@@ -243,4 +243,107 @@ describe('convertGraphToApi', () => {
     const out = convertGraphToApi(graph, objectInfo)
     expect(out['5'].inputs).not.toHaveProperty('model')
   })
+
+  it('新版前端省略已转换 widget:中间位置 widget 被转为输入,不错位', () => {
+    // KSampler: seed(extraSlot) steps cfg sampler_name scheduler denoise
+    // 模拟: cfg 被转为输入,且新版前端在 widgets_values 里省略了 cfg 条目
+    // widgets_values 仅含: [seed, 'randomize'(占位被跳), steps, sampler_name, scheduler, denoise] = 6 项
+    // 完整期望: seed(2) steps cfg sampler_name scheduler denoise = 7 项
+    const graph: GraphJson = {
+      nodes: [
+        { id: 5, type: 'KSampler',
+          widgets_values: [42, 'randomize', 4, 'euler', 'simple', 1], // 省略 cfg
+          inputs: [
+            { name: 'model', type: 'MODEL', link: null },
+            { name: 'positive', type: 'CONDITIONING', link: null },
+            { name: 'negative', type: 'CONDITIONING', link: null },
+            { name: 'latent_image', type: 'LATENT', link: null },
+            { name: 'cfg', type: 'FLOAT', link: 10, widget: { name: 'cfg' } }, // 转为输入
+          ],
+          outputs: [{ name: 'LATENT', type: 'LATENT', links: [8] }] },
+        { id: 1, type: 'CheckpointLoaderSimple', widgets_values: ['a.safetensors'],
+          outputs: [{ name: 'MODEL', type: 'MODEL', links: [10] }] },
+      ],
+      links: [
+        [10, 1, 0, 5, 3, 'FLOAT'],
+      ],
+    }
+    const out = convertGraphToApi(graph, objectInfo)
+    // cfg 来自连线,不是 widgets_values
+    expect(out['5'].inputs.cfg).toEqual(['1', 0])
+    // 后续 widget 应该对齐到正确的值(不因为 cfg 被省略而错位)
+    expect(out['5'].inputs.seed).toBe(42)
+    expect(out['5'].inputs.steps).toBe(4)
+    expect(out['5'].inputs.sampler_name).toBe('euler')
+    expect(out['5'].inputs.scheduler).toBe('simple')
+    expect(out['5'].inputs.denoise).toBe(1)
+  })
+
+  it('旧版前端保留占位:cfg 被转为输入但 widgets_values 仍含占位值', () => {
+    // 旧版行为:widgets_values 保留 cfg 的占位值(完整长度)
+    // widgets_values: [seed, 'randomize'(占位被跳), steps, cfg(占位值), sampler_name, scheduler, denoise] = 7 项
+    const graph: GraphJson = {
+      nodes: [
+        { id: 5, type: 'KSampler',
+          widgets_values: [42, 'randomize', 4, 9.5, 'euler', 'simple', 1], // cfg 占位值 9.5
+          inputs: [
+            { name: 'model', type: 'MODEL', link: null },
+            { name: 'positive', type: 'CONDITIONING', link: null },
+            { name: 'negative', type: 'CONDITIONING', link: null },
+            { name: 'latent_image', type: 'LATENT', link: null },
+            { name: 'cfg', type: 'FLOAT', link: 10, widget: { name: 'cfg' } }, // 转为输入
+          ],
+          outputs: [{ name: 'LATENT', type: 'LATENT', links: [8] }] },
+        { id: 1, type: 'CheckpointLoaderSimple', widgets_values: ['a.safetensors'],
+          outputs: [{ name: 'MODEL', type: 'MODEL', links: [10] }] },
+      ],
+      links: [
+        [10, 1, 0, 5, 3, 'FLOAT'],
+      ],
+    }
+    const out = convertGraphToApi(graph, objectInfo)
+    // 完整长度 >= fullLen,所以不跳过,cfg 被连线覆盖
+    expect(out['5'].inputs.cfg).toEqual(['1', 0])
+    // 后续 widget 依然对齐(因为完整长度,位置消费正确)
+    expect(out['5'].inputs.seed).toBe(42)
+    expect(out['5'].inputs.steps).toBe(4)
+    expect(out['5'].inputs.sampler_name).toBe('euler')
+    expect(out['5'].inputs.scheduler).toBe('simple')
+    expect(out['5'].inputs.denoise).toBe(1)
+  })
+
+  it('新版前端省略已转换 widget:尾部 seed extraSlot 被省略不错位', () => {
+    // 模拟:seed widget(含 extraSlot)被转为输入,新版前端省略了整个 seed 条目(2 个槽)
+    // KSampler: seed(extraSlot) steps cfg sampler_name scheduler denoise
+    // widgets_values 仅含: [steps, cfg, sampler_name, scheduler, denoise] = 5 项
+    // 完整期望: seed(2) steps cfg sampler_name scheduler denoise = 7 项
+    const graph: GraphJson = {
+      nodes: [
+        { id: 5, type: 'KSampler',
+          widgets_values: [4, 1, 'euler', 'simple', 1], // 省略 seed 及其占位
+          inputs: [
+            { name: 'model', type: 'MODEL', link: null },
+            { name: 'positive', type: 'CONDITIONING', link: null },
+            { name: 'negative', type: 'CONDITIONING', link: null },
+            { name: 'latent_image', type: 'LATENT', link: null },
+            { name: 'seed', type: 'INT', link: 10, widget: { name: 'seed' } }, // seed 转为输入
+          ],
+          outputs: [{ name: 'LATENT', type: 'LATENT', links: [8] }] },
+        { id: 1, type: 'CheckpointLoaderSimple', widgets_values: ['a.safetensors'],
+          outputs: [{ name: 'MODEL', type: 'MODEL', links: [10] }] },
+      ],
+      links: [
+        [10, 1, 0, 5, 0, 'INT'],
+      ],
+    }
+    const out = convertGraphToApi(graph, objectInfo)
+    // seed 来自连线
+    expect(out['5'].inputs.seed).toEqual(['1', 0])
+    // 后续 widget 对齐正确
+    expect(out['5'].inputs.steps).toBe(4)
+    expect(out['5'].inputs.cfg).toBe(1)
+    expect(out['5'].inputs.sampler_name).toBe('euler')
+    expect(out['5'].inputs.scheduler).toBe('simple')
+    expect(out['5'].inputs.denoise).toBe(1)
+  })
 })
