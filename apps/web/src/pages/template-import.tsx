@@ -82,6 +82,8 @@ export default function TemplateImportPage() {
   })
 
   const chosenCount = Object.keys(selected).length
+  const keys = rows.filter((r) => selected[rowId(r)]).map((r) => selected[rowId(r)]!.key)
+  const hasDuplicateKeys = new Set(keys).size !== keys.length
 
   return (
     <div className="space-y-4">
@@ -174,7 +176,8 @@ export default function TemplateImportPage() {
               })}
             </TableBody>
           </Table>
-          <Button disabled={!name || chosenCount === 0 || save.isPending} onClick={() => save.mutate()}>
+          {hasDuplicateKeys && <p className="text-sm text-destructive">参数 key 重复，请修改后再保存</p>}
+          <Button disabled={!name || chosenCount === 0 || save.isPending || hasDuplicateKeys} onClick={() => save.mutate()}>
             保存模板（{chosenCount} 个参数）
           </Button>
         </>

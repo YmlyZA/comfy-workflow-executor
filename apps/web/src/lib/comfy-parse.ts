@@ -10,7 +10,7 @@ export interface NodeInputRow {
 /** API-format JSON → 所有字面量输入（数组值是节点连线，跳过） */
 export function parseNodeInputs(json: Record<string, any>): NodeInputRow[] {
   return Object.entries(json).flatMap(([nodeId, node]) => {
-    if (!node || typeof node !== 'object' || typeof node.inputs !== 'object') return []
+    if (!node || typeof node !== 'object' || typeof node.inputs !== 'object' || node.inputs === null) return []
     return Object.entries(node.inputs as Record<string, unknown>)
       .filter(([, v]) => typeof v === 'string' || typeof v === 'number')
       .map(([inputName, value]) => ({

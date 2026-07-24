@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { ParamDef } from '@cwe/shared'
 import { Badge } from '@/components/ui/badge'
@@ -23,13 +24,18 @@ export interface TemplateDto {
 
 export default function TemplatesPage() {
   const qc = useQueryClient()
+  const [error, setError] = useState('')
   const { data: templates = [] } = useQuery({
     queryKey: ['templates'],
     queryFn: () => api<TemplateDto[]>('/templates'),
   })
   const del = useMutation({
     mutationFn: (id: number) => api(`/templates/${id}`, { method: 'DELETE' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['templates'] }),
+    onSuccess: () => {
+      setError('')
+      qc.invalidateQueries({ queryKey: ['templates'] })
+    },
+    onError: (e: Error) => setError(e.message),
   })
 
   return (
@@ -40,6 +46,7 @@ export default function TemplatesPage() {
           <Link to="/templates/new">导入 Workflow</Link>
         </Button>
       </div>
+      {error && <p className="text-sm text-destructive">{error}</p>}
       <Table>
         <TableHeader>
           <TableRow>
