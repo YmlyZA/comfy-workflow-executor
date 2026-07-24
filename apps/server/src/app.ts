@@ -7,6 +7,8 @@ import type { Db } from './db/index.js'
 import type { ComfyClient } from './comfy/client.js'
 import { templateRoutes } from './routes/templates.js'
 import { batchRoutes } from './routes/batches.js'
+import { eventRoutes } from './routes/events.js'
+import { downloadRoute, outputRoutes, uploadRoutes } from './routes/files.js'
 
 export interface AppDeps {
   config: Config
@@ -30,6 +32,10 @@ export function createApp(deps: AppDeps) {
     c.json({ ok: true, comfy: deps.comfy ? await deps.comfy.isUp() : false }),
   )
   app.route('/api/templates', templateRoutes(deps))
+  app.route('/api/events', eventRoutes(deps))
+  app.route('/api/uploads', uploadRoutes(deps))
+  app.route('/api/outputs', outputRoutes(deps))
+  app.route('/api/batches', downloadRoute(deps))
   app.route('/api/batches', batchRoutes(deps))
 
   return app
