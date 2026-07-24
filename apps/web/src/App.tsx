@@ -3,6 +3,7 @@ import { getToken } from '@/lib/api'
 import LoginPage from '@/pages/login'
 import TemplatesPage from '@/pages/templates'
 import TemplateImportPage from '@/pages/template-import'
+import BatchNewPage from '@/pages/batch-new'
 
 function Placeholder({ name }: { name: string }) {
   return <div className="text-muted-foreground">{name} — Task 11-13 实现</div>
@@ -36,7 +37,7 @@ export default function App() {
         <Route path="/templates" element={<TemplatesPage />} />
         <Route path="/templates/new" element={<TemplateImportPage />} />
         <Route path="/batches" element={<Placeholder name="Batches" />} />
-        <Route path="/batches/new" element={<Placeholder name="New Batch" />} />
+        <Route path="/batches/new" element={<BatchNewPage />} />
         <Route path="/batches/:id" element={<Placeholder name="Batch Detail" />} />
       </Route>
     </Routes>
