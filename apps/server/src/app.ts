@@ -38,5 +38,7 @@ export function createApp(deps: AppDeps) {
   app.route('/api/batches', downloadRoute(deps))
   app.route('/api/batches', batchRoutes(deps))
 
+  app.all('/api/*', (c) => c.json({ error: 'not found' }, 404))
+
   return app
 }

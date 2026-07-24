@@ -52,3 +52,11 @@ describe('auth middleware', () => {
     expect(res.status).not.toBe(401)
   })
 })
+
+describe('unknown api route', () => {
+  it('unknown api path returns json 404', async () => {
+    const res = await testApp().request('/api/nope', { headers: { Authorization: 'Bearer secret' } })
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({ error: 'not found' })
+  })
+})
