@@ -67,12 +67,12 @@ export default function BatchDetailPage() {
         </div>
         <div className="space-x-2">
           {failed > 0 && (
-            <Button variant="outline" onClick={() => act.mutate('retry-failed')}>
+            <Button variant="outline" onClick={() => act.mutate('retry-failed')} disabled={act.isPending}>
               重试失败任务（{failed}）
             </Button>
           )}
           {['pending', 'running'].includes(batch.status) && (
-            <Button variant="destructive" onClick={() => act.mutate('cancel')}>
+            <Button variant="destructive" onClick={() => act.mutate('cancel')} disabled={act.isPending}>
               取消
             </Button>
           )}

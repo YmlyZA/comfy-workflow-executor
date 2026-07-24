@@ -20,6 +20,7 @@ export function useEvents(): Record<number, JobProgress> {
       const d = JSON.parse((e as MessageEvent).data) as { jobId: number; value: number; max: number }
       setProgress((prev) => ({ ...prev, [d.jobId]: { value: d.value, max: d.max } }))
     })
+    es.onerror = () => console.warn('SSE connection error — browser will retry')
     return () => es.close()
   }, [qc])
 
