@@ -1,10 +1,12 @@
+import { EventEmitter } from 'node:events'
 import { describe, expect, it } from 'vitest'
 import { loadConfig } from '../src/config.js'
 import { createApp } from '../src/app.js'
+import { createDb } from '../src/db/index.js'
 
 function testApp() {
   const config = loadConfig({ AUTH_TOKEN: 'secret', DATA_DIR: './data-test' })
-  return createApp({ config })
+  return createApp({ config, db: createDb(':memory:'), comfy: null, events: new EventEmitter() })
 }
 
 describe('loadConfig', () => {

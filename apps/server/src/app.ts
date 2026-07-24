@@ -1,11 +1,18 @@
+import { EventEmitter } from 'node:events'
 import { Hono } from 'hono'
 import { ZodError } from 'zod'
 import { auth } from './auth.js'
 import type { Config } from './config.js'
+import type { Db } from './db/index.js'
+import type { ComfyClient } from './comfy/client.js'
+import { templateRoutes } from './routes/templates.js'
+import { batchRoutes } from './routes/batches.js'
 
 export interface AppDeps {
   config: Config
-  [key: string]: any
+  db: Db
+  comfy: ComfyClient | null
+  events: EventEmitter
 }
 
 export function createApp(deps: AppDeps) {
@@ -19,9 +26,11 @@ export function createApp(deps: AppDeps) {
 
   app.use('/api/*', auth(deps.config.authToken))
 
-  app.get('/api/health', (c) => c.json({ ok: true }))
-  // 占位，Task 6 挂真实路由；先保证 auth 测试有非 404 路由可打
-  app.get('/api/templates', (c) => c.json([]))
+  app.get('/api/health', async (c) =>
+    c.json({ ok: true, comfy: deps.comfy ? await deps.comfy.isUp() : false }),
+  )
+  app.route('/api/templates', templateRoutes(deps))
+  app.route('/api/batches', batchRoutes(deps))
 
   return app
 }
