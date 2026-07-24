@@ -75,7 +75,7 @@ export default function BatchNewPage() {
       </div>
 
       {template && (
-        <Tabs defaultValue="table" onValueChange={() => setJobs([])}>
+        <Tabs key={template.id} defaultValue="table" onValueChange={() => setJobs([])}>
           <TabsList>
             <TabsTrigger value="table">表格 / CSV</TabsTrigger>
             <TabsTrigger value="matrix">矩阵组合</TabsTrigger>
@@ -138,6 +138,7 @@ function TableEntry({
   const [rows, setRows] = useState<ParamValues[]>([{}])
   const [csvOpen, setCsvOpen] = useState(false)
   const [csvText, setCsvText] = useState('')
+  const [error, setError] = useState('')
 
   function update(next: ParamValues[]) {
     setRows(next)
@@ -153,6 +154,11 @@ function TableEntry({
     const imported = parsed.data.map((row) =>
       Object.fromEntries(Object.entries(row).filter(([k, v]) => keys.has(k) && v !== '')),
     )
+    if (imported.filter((r) => Object.keys(r).length > 0).length === 0) {
+      setError(`CSV 无匹配数据：表头需与参数 key 一致（${template.params.map((p) => p.key).join(', ')}）`)
+      return
+    }
+    setError('')
     update(imported)
     setCsvOpen(false)
   }
@@ -214,6 +220,7 @@ function TableEntry({
           <Button size="sm" onClick={importCsv}>
             导入
           </Button>
+          {error && <p className="text-sm text-destructive">{error}</p>}
         </div>
       )}
     </div>
@@ -279,9 +286,11 @@ function ImagesEntry({
   const [imageKey, setImageKey] = useState(imageParams[0]?.key ?? '')
   const [shared, setShared] = useState<ParamValues>({})
   const [uploading, setUploading] = useState(false)
+  const [error, setError] = useState('')
 
   async function onFiles(files: FileList) {
     setUploading(true)
+    setError('')
     try {
       const form = new FormData()
       for (const f of files) form.append('files', f)
@@ -290,6 +299,8 @@ function ImagesEntry({
         body: form,
       })
       onChange(stored.map((s) => ({ ...shared, [imageKey]: s.stored })))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
     } finally {
       setUploading(false)
     }
@@ -338,6 +349,7 @@ function ImagesEntry({
         onChange={(e) => e.target.files?.length && onFiles(e.target.files)}
       />
       {uploading && <p className="text-sm text-muted-foreground">上传中…</p>}
+      {error && <p className="text-sm text-destructive">{error}</p>}
     </div>
   )
 }
