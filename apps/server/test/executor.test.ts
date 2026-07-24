@@ -2,66 +2,13 @@ import { EventEmitter } from 'node:events'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, join } from 'node:path'
+import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { ParamDef, ParamValues } from '@cwe/shared'
 import { createDb, type Db } from '../src/db/index.js'
 import * as repo from '../src/db/repo.js'
 import { Executor } from '../src/executor.js'
-import type { ComfyClient, ComfyHistoryEntry, OutputRef } from '../src/comfy/client.js'
-
-class FakeComfy implements ComfyClient {
-  up = true
-  submitted: Array<Record<string, any>> = []
-  uploads: string[] = []
-  history = new Map<string, ComfyHistoryEntry>()
-  queued = new Set<string>()
-  /** 每个 promptId 在返回存好的 history 结果之前，getHistory 需要被调用几次（模拟 history 延迟填充） */
-  historyDelayPolls = 0
-  private pollCounts = new Map<string, number>()
-  private n = 0
-  /** 每次 submit 后自动写入的 history 结果；null 表示留空（pending 中） */
-  nextResult: ComfyHistoryEntry | null = {
-    status: { completed: true },
-    outputs: { '9': { images: [{ filename: 'out.png', subfolder: '', type: 'output' }] } },
-  }
-
-  async isUp() {
-    return this.up
-  }
-  async interrupt() {}
-  async uploadImage(filePath: string) {
-    this.uploads.push(filePath)
-    return `uploaded-${basename(filePath)}`
-  }
-  async submit(prompt: Record<string, any>) {
-    this.submitted.push(prompt)
-    const id = `p${++this.n}`
-    if (this.nextResult) {
-      this.history.set(id, this.nextResult)
-      this.queued.add(id)
-    }
-    return id
-  }
-  async getHistory(promptId: string) {
-    if (!this.history.has(promptId)) return null
-    const count = (this.pollCounts.get(promptId) ?? 0) + 1
-    this.pollCounts.set(promptId, count)
-    if (count <= this.historyDelayPolls) return null
-    const entry = this.history.get(promptId)!
-    this.queued.delete(promptId)
-    return entry
-  }
-  async getQueuedIds() {
-    return this.queued
-  }
-  async downloadOutput(_ref: OutputRef, destPath: string) {
-    await writeFile(destPath, 'png-bytes')
-  }
-  connectEvents() {
-    return () => {}
-  }
-}
+import { FakeComfy } from './fake-comfy.js'
 
 const comfyJson = {
   '6': { class_type: 'CLIPTextEncode', inputs: { text: 'x' } },

@@ -21,6 +21,12 @@ export interface ComfyWsEvent {
   data?: any
 }
 
+/** GET /object_info 返回的节点定义(仅声明本项目用到的 input 部分) */
+export type ObjectInfoMap = Record<
+  string,
+  { input?: { required?: Record<string, unknown[]>; optional?: Record<string, unknown[]> } }
+>
+
 export interface ComfyClient {
   isUp(): Promise<boolean>
   interrupt(): Promise<void>
@@ -30,6 +36,8 @@ export interface ComfyClient {
   /** prompt ids currently queued or executing */
   getQueuedIds(): Promise<Set<string>>
   downloadOutput(ref: OutputRef, destPath: string): Promise<void>
+  /** 全量节点定义,体积较大,调用方应走 ObjectInfoCache */
+  getObjectInfo(): Promise<ObjectInfoMap>
   /** 返回断开函数。连接失败时静默重试由调用方负责。 */
   connectEvents(clientId: string, onEvent: (e: ComfyWsEvent) => void): () => void
 }
@@ -115,6 +123,12 @@ export function createComfyClient(baseUrl: string): ComfyClient {
       for (const entry of body.queue_running ?? []) ids.add(entry[1])
       for (const entry of body.queue_pending ?? []) ids.add(entry[1])
       return ids
+    },
+
+    async getObjectInfo() {
+      const res = await fetch(`${http}/object_info`)
+      if (!res.ok) throw new Error(`object_info failed: ${res.status}`)
+      return (await res.json()) as ObjectInfoMap
     },
 
     async downloadOutput(ref, destPath) {
