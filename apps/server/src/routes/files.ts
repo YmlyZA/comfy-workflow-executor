@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { createReadStream, existsSync } from 'node:fs'
+import { createReadStream, existsSync, statSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { basename, join, normalize, resolve } from 'node:path'
 import { Readable } from 'node:stream'
@@ -37,10 +37,16 @@ export function outputRoutes(deps: AppDeps) {
   const root = resolve(deps.config.dataDir, 'outputs')
 
   app.get('/*', (c) => {
-    const rel = decodeURIComponent(c.req.path.replace(/^\/api\/outputs\//, ''))
+    let rel: string
+    try {
+      rel = decodeURIComponent(c.req.path.replace(/^\/api\/outputs\//, ''))
+    } catch {
+      return c.json({ error: 'invalid path' }, 400)
+    }
     const full = resolve(root, normalize(rel))
     if (!full.startsWith(root + '/')) return c.json({ error: 'invalid path' }, 400)
-    if (!existsSync(full)) return c.json({ error: 'not found' }, 404)
+    const stat = statSync(full, { throwIfNoEntry: false })
+    if (!stat || !stat.isFile()) return c.json({ error: 'not found' }, 404)
     const stream = Readable.toWeb(createReadStream(full)) as ReadableStream
     return c.body(stream)
   })
@@ -57,6 +63,8 @@ export function downloadRoute(deps: AppDeps) {
     const detail = getBatchDetail(deps.db, id)
     const zipName = detail ? `${detail.batch.name}-${id}.zip` : `batch-${id}.zip`
     const archive = archiver('zip')
+    archive.on('error', (err) => console.error('zip archive error', err))
+    archive.on('warning', (err) => console.error('zip archive warning', err))
     if (existsSync(dir)) archive.directory(dir, false)
     void archive.finalize()
     c.header('Content-Type', 'application/zip')
