@@ -27,6 +27,8 @@ export interface ComfyClient {
   uploadImage(filePath: string): Promise<string>
   submit(prompt: Record<string, any>, clientId: string): Promise<string>
   getHistory(promptId: string): Promise<ComfyHistoryEntry | null>
+  /** prompt ids currently queued or executing */
+  getQueuedIds(): Promise<Set<string>>
   downloadOutput(ref: OutputRef, destPath: string): Promise<void>
   /** 返回断开函数。连接失败时静默重试由调用方负责。 */
   connectEvents(clientId: string, onEvent: (e: ComfyWsEvent) => void): () => void
@@ -100,6 +102,19 @@ export function createComfyClient(baseUrl: string): ComfyClient {
       if (!res.ok) throw new Error(`history failed: ${res.status}`)
       const body = (await res.json()) as Record<string, ComfyHistoryEntry>
       return body[promptId] ?? null
+    },
+
+    async getQueuedIds() {
+      const res = await fetch(`${http}/queue`)
+      if (!res.ok) throw new Error(`queue failed: ${res.status}`)
+      const body = (await res.json()) as {
+        queue_running: Array<[number, string, ...unknown[]]>
+        queue_pending: Array<[number, string, ...unknown[]]>
+      }
+      const ids = new Set<string>()
+      for (const entry of body.queue_running ?? []) ids.add(entry[1])
+      for (const entry of body.queue_pending ?? []) ids.add(entry[1])
+      return ids
     },
 
     async downloadOutput(ref, destPath) {

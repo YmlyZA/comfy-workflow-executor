@@ -15,6 +15,10 @@ class FakeComfy implements ComfyClient {
   submitted: Array<Record<string, any>> = []
   uploads: string[] = []
   history = new Map<string, ComfyHistoryEntry>()
+  queued = new Set<string>()
+  /** 每个 promptId 在返回存好的 history 结果之前，getHistory 需要被调用几次（模拟 history 延迟填充） */
+  historyDelayPolls = 0
+  private pollCounts = new Map<string, number>()
   private n = 0
   /** 每次 submit 后自动写入的 history 结果；null 表示留空（pending 中） */
   nextResult: ComfyHistoryEntry | null = {
@@ -33,11 +37,23 @@ class FakeComfy implements ComfyClient {
   async submit(prompt: Record<string, any>) {
     this.submitted.push(prompt)
     const id = `p${++this.n}`
-    if (this.nextResult) this.history.set(id, this.nextResult)
+    if (this.nextResult) {
+      this.history.set(id, this.nextResult)
+      this.queued.add(id)
+    }
     return id
   }
   async getHistory(promptId: string) {
-    return this.history.get(promptId) ?? null
+    if (!this.history.has(promptId)) return null
+    const count = (this.pollCounts.get(promptId) ?? 0) + 1
+    this.pollCounts.set(promptId, count)
+    if (count <= this.historyDelayPolls) return null
+    const entry = this.history.get(promptId)!
+    this.queued.delete(promptId)
+    return entry
+  }
+  async getQueuedIds() {
+    return this.queued
   }
   async downloadOutput(_ref: OutputRef, destPath: string) {
     await writeFile(destPath, 'png-bytes')
@@ -199,14 +215,24 @@ describe('executor', () => {
     expect(batchEvents.every((e) => e.status === 'canceled')).toBe(true)
   })
 
-  it('fails job when prompt disappears from history after comfyui restart', async () => {
+  it('fails job when prompt disappears from queue/history after comfyui restart', async () => {
     comfy.nextResult = null
     const b = seed()
+    expect(comfy.queued.size).toBe(0)
     const ex = makeExecutor()
     expect(await ex.runPendingOnce()).toBe(true)
     const job = repo.getBatchDetail(db, b.id)!.jobs[0]!
     expect(job.status).toBe('failed')
     expect(job.error).toContain('disappeared')
+  })
+
+  it('survives many null history polls while prompt stays in comfyui queue (real-world long job)', async () => {
+    comfy.historyDelayPolls = 8 // well past the old 5-null-poll threshold
+    const b = seed()
+    const ex = makeExecutor()
+    expect(await ex.runPendingOnce()).toBe(true)
+    const job = repo.getBatchDetail(db, b.id)!.jobs[0]!
+    expect(job.status).toBe('succeeded')
   })
 
   it('survives transient getHistory errors', async () => {

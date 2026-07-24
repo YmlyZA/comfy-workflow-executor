@@ -119,13 +119,20 @@ export class Executor {
 
   private async waitForHistory(promptId: string): Promise<ComfyHistoryEntry> {
     let backoff = this.pollMs
-    let confirmedUpNullCount = 0
+    let lostCount = 0
     for (;;) {
       let entry: ComfyHistoryEntry | null
+      let stillQueued = true
       try {
         entry = await this.comfy.getHistory(promptId)
+        if (entry === null) {
+          // history 尚未写入：正常情况下 prompt 仍在 ComfyUI 的队列中（排队或执行中）。
+          // 只有当它既不在 history 也不在队列里时，才可能是 ComfyUI 重启丢失了任务。
+          const queued = await this.comfy.getQueuedIds()
+          stillQueued = queued.has(promptId)
+        }
       } catch {
-        // ComfyUI 掉线：等待重连，batch 保持 running 不失败
+        // ComfyUI 掉线 / 查询失败：等待重连，batch 保持 running 不失败
         await sleep(backoff)
         backoff = Math.min(backoff * 2, 30_000)
         continue
@@ -138,18 +145,18 @@ export class Executor {
         )
       }
       if (entry === null) {
-        // ComfyUI 可能重启丢失了内存中的队列，导致 prompt id 永远查不到 history。
-        // 仅当确认 ComfyUI 在线时才计数——离线情况已由上面的 transient-error backoff 处理。
-        if (await this.comfy.isUp()) {
-          confirmedUpNullCount++
-          if (confirmedUpNullCount >= 5) {
-            throw new Error('prompt disappeared from comfyui history (comfyui restarted?)')
-          }
+        if (stillQueued) {
+          lostCount = 0
         } else {
-          confirmedUpNullCount = 0
+          // 队列相对 history 移除可能有短暂延迟，因此要求连续多次观测到
+          // "不在队列且不在 history" 才判定丢失。
+          lostCount++
+          if (lostCount >= 3) {
+            throw new Error('prompt disappeared from comfyui queue/history (comfyui restarted?)')
+          }
         }
       } else {
-        confirmedUpNullCount = 0
+        lostCount = 0
       }
       await sleep(this.pollMs)
     }
