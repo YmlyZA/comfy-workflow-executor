@@ -119,6 +119,7 @@ export class Executor {
 
   private async waitForHistory(promptId: string): Promise<ComfyHistoryEntry> {
     let backoff = this.pollMs
+    let confirmedUpNullCount = 0
     for (;;) {
       let entry: ComfyHistoryEntry | null
       try {
@@ -135,6 +136,20 @@ export class Executor {
         throw new Error(
           `comfyui execution error: ${JSON.stringify(entry.status.messages ?? []).slice(0, 500)}`,
         )
+      }
+      if (entry === null) {
+        // ComfyUI 可能重启丢失了内存中的队列，导致 prompt id 永远查不到 history。
+        // 仅当确认 ComfyUI 在线时才计数——离线情况已由上面的 transient-error backoff 处理。
+        if (await this.comfy.isUp()) {
+          confirmedUpNullCount++
+          if (confirmedUpNullCount >= 5) {
+            throw new Error('prompt disappeared from comfyui history (comfyui restarted?)')
+          }
+        } else {
+          confirmedUpNullCount = 0
+        }
+      } else {
+        confirmedUpNullCount = 0
       }
       await sleep(this.pollMs)
     }

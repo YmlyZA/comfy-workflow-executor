@@ -199,6 +199,16 @@ describe('executor', () => {
     expect(batchEvents.every((e) => e.status === 'canceled')).toBe(true)
   })
 
+  it('fails job when prompt disappears from history after comfyui restart', async () => {
+    comfy.nextResult = null
+    const b = seed()
+    const ex = makeExecutor()
+    expect(await ex.runPendingOnce()).toBe(true)
+    const job = repo.getBatchDetail(db, b.id)!.jobs[0]!
+    expect(job.status).toBe('failed')
+    expect(job.error).toContain('disappeared')
+  })
+
   it('survives transient getHistory errors', async () => {
     const b = seed()
     const completed = comfy.nextResult!
