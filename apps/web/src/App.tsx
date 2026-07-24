@@ -1,13 +1,11 @@
 import { Link, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import { getToken } from '@/lib/api'
-import LoginPage from '@/pages/login'
-import TemplatesPage from '@/pages/templates'
-import TemplateImportPage from '@/pages/template-import'
+import BatchDetailPage from '@/pages/batch-detail'
 import BatchNewPage from '@/pages/batch-new'
-
-function Placeholder({ name }: { name: string }) {
-  return <div className="text-muted-foreground">{name} — Task 11-13 实现</div>
-}
+import BatchesPage from '@/pages/batches'
+import LoginPage from '@/pages/login'
+import TemplateImportPage from '@/pages/template-import'
+import TemplatesPage from '@/pages/templates'
 
 function RequireToken() {
   const location = useLocation()
@@ -36,9 +34,9 @@ export default function App() {
         <Route path="/" element={<Navigate to="/batches" replace />} />
         <Route path="/templates" element={<TemplatesPage />} />
         <Route path="/templates/new" element={<TemplateImportPage />} />
-        <Route path="/batches" element={<Placeholder name="Batches" />} />
+        <Route path="/batches" element={<BatchesPage />} />
         <Route path="/batches/new" element={<BatchNewPage />} />
-        <Route path="/batches/:id" element={<Placeholder name="Batch Detail" />} />
+        <Route path="/batches/:id" element={<BatchDetailPage />} />
       </Route>
     </Routes>
   )
