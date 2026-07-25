@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { createReadStream, existsSync, statSync } from 'node:fs'
+import { createReadStream, existsSync, readdirSync, statSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { basename, join, normalize, resolve } from 'node:path'
 import { Readable } from 'node:stream'
@@ -10,6 +10,22 @@ import { getBatchDetail } from '../db/repo.js'
 
 export function uploadRoutes(deps: AppDeps) {
   const app = new Hono()
+
+  app.get('/', (c) => {
+    const dir = join(deps.config.dataDir, 'uploads')
+    let entries: string[] = []
+    try {
+      entries = readdirSync(dir)
+    } catch {
+      return c.json({ files: [] })
+    }
+    const files = entries
+      .map((name) => ({ name, stat: statSync(join(dir, name), { throwIfNoEntry: false }) }))
+      .filter((e) => e.stat?.isFile())
+      .sort((a, b) => (b.stat?.mtimeMs ?? 0) - (a.stat?.mtimeMs ?? 0))
+      .map((e) => e.name)
+    return c.json({ files })
+  })
 
   app.post('/', async (c) => {
     const body = await c.req.parseBody({ all: true })

@@ -56,5 +56,14 @@ export function comfyRoutes(deps: AppDeps) {
     return c.json({ options })
   })
 
+  /** GPU 主机 input 目录文件清单(借 LoadImage 的 COMBO 选项);enum 语义不受影响 */
+  app.get('/input-files', async (c) => {
+    const info = await objectInfo(c.req.query('refresh') === '1')
+    if (!info) return c.json({ error: 'ComfyUI 离线,无法获取输入文件列表' }, 503)
+    const spec = info.LoadImage?.input?.required?.image
+    const files = Array.isArray(spec?.[0]) ? (spec[0] as unknown[]).map(String) : []
+    return c.json({ files })
+  })
+
   return app
 }

@@ -184,3 +184,24 @@ describe('GET /api/comfy/input-options', () => {
     expect(res.status).toBe(401)
   })
 })
+
+describe('GET /api/comfy/input-files', () => {
+  it('返回 LoadImage 的 GPU 侧输入文件清单', async () => {
+    const res = await app.request('/api/comfy/input-files', { headers: H })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ files: ['existing.png'] })
+  })
+
+  it('object_info 无 LoadImage 时返回空数组', async () => {
+    delete (comfy.objectInfo as Record<string, unknown>).LoadImage
+    const res = await app.request('/api/comfy/input-files', { headers: H })
+    expect(await res.json()).toEqual({ files: [] })
+  })
+
+  it('离线返回 503', async () => {
+    comfy.getObjectInfo = async () => {
+      throw new Error('down')
+    }
+    expect((await app.request('/api/comfy/input-files', { headers: H })).status).toBe(503)
+  })
+})
