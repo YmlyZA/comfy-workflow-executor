@@ -1,5 +1,5 @@
 import { useMutation } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { ParamDef, ParamType } from '@cwe/shared'
 import { Button } from '@/components/ui/button'
@@ -47,6 +47,7 @@ function apiErrorMessage(e: unknown): string {
 
 export default function TemplateImportPage() {
   const navigate = useNavigate()
+  const importSeq = useRef(0)
   const [name, setName] = useState('')
   const [json, setJson] = useState<Record<string, any> | null>(null)
   const [rows, setRows] = useState<NodeInputRow[]>([])
@@ -61,6 +62,7 @@ export default function TemplateImportPage() {
   const [busy, setBusy] = useState(false)
 
   async function ingest(parsed: unknown, sourceName: string) {
+    const seq = ++importSeq.current
     setError('')
     setValidation(null)
     setBusy(true)
@@ -68,43 +70,45 @@ export default function TemplateImportPage() {
       let comfyJson: Record<string, any>
       const format = detectFormat(parsed)
       if (format === 'graph') {
-        try {
-          const res = await api<{ comfyJson: Record<string, any> }>('/comfy/convert', {
-            method: 'POST',
-            body: JSON.stringify(parsed),
-          })
-          comfyJson = res.comfyJson
-        } catch (e) {
-          setError(apiErrorMessage(e))
-          return
-        }
+        const res = await api<{ comfyJson: Record<string, any> }>('/comfy/convert', {
+          method: 'POST',
+          body: JSON.stringify(parsed),
+        })
+        if (seq !== importSeq.current) return
+        comfyJson = res.comfyJson
       } else if (format === 'api') {
         comfyJson = parsed as Record<string, any>
       } else {
-        setError('无法识别的 JSON 格式——需要 ComfyUI 导出的 workflow(UI 格式或 API 格式均可)')
-        return
+        throw new Error('无法识别的 JSON 格式——需要 ComfyUI 导出的 workflow(UI 格式或 API 格式均可)')
       }
 
       const inputs = parseNodeInputs(comfyJson)
       if (inputs.length === 0) {
-        setError('未解析到任何节点输入')
-        return
+        throw new Error('未解析到任何节点输入')
       }
 
-      // 校验 + 枚举标注(端点不可用时静默跳过,不阻断导入)
+      // 校验 + 枚举标注
       let refs = new Map<string, { classType: string; inputName: string }>()
       try {
         const v = await api<ValidateResponse>('/comfy/validate', {
           method: 'POST',
           body: JSON.stringify(comfyJson),
         })
-        setValidation(v)
+        if (seq !== importSeq.current) return
         refs = new Map(
           v.enumInputs.map((e) => [`${e.nodeId}.${e.inputName}`, { classType: e.classType, inputName: e.inputName }]),
         )
+        if (seq === importSeq.current) {
+          setValidation(v)
+        }
       } catch {
-        /* 校验失败不阻断导入 */
+        // validate 失败时设置 skipped 状态，不阻断导入
+        if (seq === importSeq.current) {
+          setValidation({ skipped: true, warnings: [], enumInputs: [] })
+        }
       }
+
+      if (seq !== importSeq.current) return
 
       const pre: Record<string, Selection> = {}
       for (const s of suggestParams(comfyJson)) {
@@ -124,39 +128,41 @@ export default function TemplateImportPage() {
         ),
       )
       if (!name && sourceName) setName(sourceName)
+    } catch (e) {
+      if (seq === importSeq.current) {
+        setError(apiErrorMessage(e))
+      }
     } finally {
-      setBusy(false)
+      if (seq === importSeq.current) {
+        setBusy(false)
+      }
     }
   }
 
   async function onFile(file: File) {
-    if (file.type === 'image/png' || /\.png$/i.test(file.name)) {
-      const meta = extractComfyMetadata(await file.arrayBuffer())
-      const text = meta.prompt ?? meta.workflow // 优先 API 格式,免转换
-      if (!text) {
-        setError('该 PNG 不含 ComfyUI 元数据')
-        return
-      }
-      try {
+    try {
+      if (file.type === 'image/png' || /\.png$/i.test(file.name)) {
+        const meta = extractComfyMetadata(await file.arrayBuffer())
+        const text = meta.prompt ?? meta.workflow // 优先 API 格式,免转换
+        if (!text) {
+          setError('该 PNG 不含 ComfyUI 元数据')
+          return
+        }
         await ingest(JSON.parse(text), file.name.replace(/\.png$/i, ''))
-      } catch {
-        setError('PNG 内嵌的 workflow JSON 解析失败')
-      }
-    } else {
-      try {
+      } else {
         await ingest(JSON.parse(await file.text()), file.name.replace(/\.json$/i, ''))
-      } catch {
-        setError('JSON 解析失败')
       }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '导入失败')
     }
   }
 
-  function importPaste() {
+  async function importPaste() {
     try {
-      void ingest(JSON.parse(pasteText), '')
+      await ingest(JSON.parse(pasteText), '')
       setPasteOpen(false)
-    } catch {
-      setError('JSON 解析失败')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'JSON 解析失败')
     }
   }
 
@@ -239,6 +245,7 @@ export default function TemplateImportPage() {
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {
         e.preventDefault()
+        if (busy) return
         const f = e.dataTransfer.files?.[0]
         if (f) void onFile(f)
       }}
@@ -252,6 +259,7 @@ export default function TemplateImportPage() {
           type="file"
           accept=".json,.png"
           className="w-72"
+          disabled={busy}
           onChange={(e) => e.target.files?.[0] && void onFile(e.target.files[0])}
         />
         <Button variant="outline" onClick={() => setPasteOpen((v) => !v)}>
@@ -272,7 +280,7 @@ export default function TemplateImportPage() {
             value={pasteText}
             onChange={(e) => setPasteText(e.target.value)}
           />
-          <Button size="sm" onClick={importPaste} disabled={!pasteText.trim() || busy}>
+          <Button size="sm" onClick={() => void importPaste()} disabled={!pasteText.trim() || busy}>
             解析
           </Button>
         </div>
