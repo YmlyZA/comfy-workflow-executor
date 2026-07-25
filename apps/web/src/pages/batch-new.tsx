@@ -353,17 +353,52 @@ function ImagesEntry({
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
 
+  const dimPair = findDimPair(template.params)
+  const [lockRatio, setLockRatio] = useState(false)
+  const [driver, setDriver] = useState<'width' | 'height'>('width')
+  const [driverValue, setDriverValue] = useState('')
+  const [dimsWarning, setDimsWarning] = useState('')
+
   async function onFiles(files: FileList) {
     setUploading(true)
     setError('')
+    setDimsWarning('')
     try {
+      const n = Number(driverValue)
+      if (lockRatio && dimPair && (!driverValue || Number.isNaN(n) || n <= 0)) {
+        setError('锁定比例后需先填写有效的宽或高数值')
+        return
+      }
       const form = new FormData()
       for (const f of files) form.append('files', f)
       const stored = await api<Array<{ name: string; stored: string }>>('/uploads', {
         method: 'POST',
         body: form,
       })
-      onChange(stored.map((s) => ({ ...shared, [imageKey]: s.stored })))
+      if (lockRatio && dimPair) {
+        const results = await Promise.allSettled(
+          stored.map((s) =>
+            api<{ width: number; height: number }>(
+              `/comfy/image-dims?name=${encodeURIComponent(s.stored)}`,
+            ),
+          ),
+        )
+        let failed = 0
+        const jobs = stored.map((s, i) => {
+          const r = results[i]!
+          const base: ParamValues = { ...shared, [imageKey]: s.stored }
+          if (r.status === 'fulfilled') {
+            const d = computeLockedDim(r.value, driver, n)
+            return { ...base, [dimPair.width.key]: d.width, [dimPair.height.key]: d.height }
+          }
+          failed++
+          return base // 宽高留空 → 提交时用模板默认值
+        })
+        if (failed > 0) setDimsWarning(`${failed} 张图未能获取尺寸，已用模板默认宽高`)
+        onChange(jobs)
+      } else {
+        onChange(stored.map((s) => ({ ...shared, [imageKey]: s.stored })))
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -394,25 +429,68 @@ function ImagesEntry({
           </Select>
         </div>
       )}
-      <div className="grid grid-cols-2 gap-4">
-        {otherParams.map((p) => (
-          <div key={p.key} className="space-y-1">
-            <Label>{p.key}（所有任务共享）</Label>
-            {p.type === 'enum' ? (
-              <EnumValueSelect
-                param={p}
-                value={String(shared[p.key] ?? '')}
-                onChange={(v) => setShared((prev) => ({ ...prev, [p.key]: v }))}
-              />
-            ) : (
+      {dimPair && (
+        <div className="space-y-2 rounded-md border p-3">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={lockRatio}
+              onChange={(e) => setLockRatio(e.target.checked)}
+            />
+            锁定源图比例（每张图按各自比例计算另一维）
+          </label>
+          {lockRatio && (
+            <div className="flex items-center gap-2">
+              <Select value={driver} onValueChange={(v) => setDriver(v as 'width' | 'height')}>
+                <SelectTrigger className="w-32">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="width">按宽定高</SelectItem>
+                  <SelectItem value="height">按高定宽</SelectItem>
+                </SelectContent>
+              </Select>
               <Input
-                placeholder={String(p.default ?? '')}
-                value={String(shared[p.key] ?? '')}
-                onChange={(e) => setShared((prev) => ({ ...prev, [p.key]: e.target.value }))}
+                className="w-32"
+                placeholder={String(
+                  (driver === 'width' ? dimPair.width : dimPair.height).default ?? '',
+                )}
+                value={driverValue}
+                onChange={(e) => setDriverValue(e.target.value)}
               />
-            )}
-          </div>
-        ))}
+              <Input className="w-40" disabled placeholder="另一维自动（按源图比例）" value="" readOnly />
+            </div>
+          )}
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-4">
+        {otherParams
+          .filter(
+            (p) =>
+              !(
+                lockRatio &&
+                dimPair &&
+                (p.key === dimPair.width.key || p.key === dimPair.height.key)
+              ),
+          )
+          .map((p) => (
+            <div key={p.key} className="space-y-1">
+              <Label>{p.key}（所有任务共享）</Label>
+              {p.type === 'enum' ? (
+                <EnumValueSelect
+                  param={p}
+                  value={String(shared[p.key] ?? '')}
+                  onChange={(v) => setShared((prev) => ({ ...prev, [p.key]: v }))}
+                />
+              ) : (
+                <Input
+                  placeholder={String(p.default ?? '')}
+                  value={String(shared[p.key] ?? '')}
+                  onChange={(e) => setShared((prev) => ({ ...prev, [p.key]: e.target.value }))}
+                />
+              )}
+            </div>
+          ))}
       </div>
       <Input
         type="file"
@@ -423,6 +501,7 @@ function ImagesEntry({
       />
       {uploading && <p className="text-sm text-muted-foreground">上传中…</p>}
       {error && <p className="text-sm text-destructive">{error}</p>}
+      {dimsWarning && <p className="text-sm text-muted-foreground">⚠ {dimsWarning}</p>}
     </div>
   )
 }
