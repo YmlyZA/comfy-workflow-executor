@@ -151,9 +151,18 @@ function TableEntry({
   const [sizeMode, setSizeMode] = useState<SizeMode>('default')
   const [capText, setCapText] = useState('')
 
+  // rows → jobs 同步(过滤空行);全量 update 与函数式 patchRow 都经这里通知父级
+  useEffect(() => {
+    onChange(rows.filter((r) => Object.keys(r).length > 0))
+  }, [rows, onChange])
+
   function update(next: ParamValues[]) {
     setRows(next)
-    onChange(next.filter((r) => Object.keys(r).length > 0))
+  }
+
+  /** 行内补丁:函数式更新,同一批次多个 SourceDimCell 补丁不会互相覆盖 */
+  function patchRow(i: number, patch: Record<string, string | number>) {
+    setRows((prev) => prev.map((r, j) => (j === i ? { ...r, ...patch } : r)))
   }
 
   function importCsv() {
@@ -232,22 +241,16 @@ function TableEntry({
                       imageName={String(row[imageParam.key] ?? imageParam.default ?? '')}
                       locked={sizeMode === 'ratio'}
                       value={String(row[p.key] ?? '')}
-                      onPatch={(patch) => {
-                        const next = rows.map((r, j) => (j === i ? { ...r, ...patch } : r))
-                        update(next)
-                      }}
+                      onPatch={(patch) => patchRow(i, patch)}
                     />
                   ) : sizeMode === 'source' && dimPair && imageParam && p.key === dimPair.width.key ? (
                     <SourceDimCell
                       p={p}
                       heightKey={dimPair.height.key}
-                      imageName={String(row[imageParam.key] ?? imageParam.default ?? '')}
+                      imageName={String(row[imageParam.key] ?? '')}
                       cap={parseCap(capText)}
                       value={String(row[p.key] ?? '')}
-                      onPatch={(patch) => {
-                        const next = rows.map((r, j) => (j === i ? { ...r, ...patch } : r))
-                        update(next)
-                      }}
+                      onPatch={(patch) => patchRow(i, patch)}
                     />
                   ) : p.type === 'enum' ? (
                     <EnumValueSelect
@@ -564,10 +567,10 @@ function ImagesEntry({
 /** 输出尺寸模式:模板默认 / 锁定比例(填一边) / 跟随源图(可选最长边上限) */
 type SizeMode = 'default' | 'ratio' | 'source'
 
-/** 最长边上限解析:空/非法/非正视为未填 */
+/** 最长边上限解析:空/非法/小于 8 视为未填 */
 function parseCap(text: string): number | undefined {
   const n = Number(text)
-  return text.trim() !== '' && !Number.isNaN(n) && n > 0 ? n : undefined
+  return text.trim() !== '' && !Number.isNaN(n) && n >= 8 ? n : undefined
 }
 
 /** 第一对 inputName 为 width/height 的 number 参数;凑不齐返回 null */
