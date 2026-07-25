@@ -1,4 +1,8 @@
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { eq } from 'drizzle-orm'
+import Database from 'better-sqlite3'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createDb, type Db } from '../src/db/index.js'
 import * as repo from '../src/db/repo.js'
@@ -135,5 +139,51 @@ describe('batch lifecycle', () => {
     repo.resetJobToPending(db, job.id)
     expect(repo.listRunningJobs(db)).toHaveLength(0)
     expect(repo.claimNextJob(db)?.job.id).toBe(job.id)
+  })
+})
+
+describe('template sort_order', () => {
+  it('新建模板追加到末尾, listTemplates 按 sort_order 返回', () => {
+    const a = repo.createTemplate(db, { name: 'A', comfyJson: {}, params: [] })
+    const b = repo.createTemplate(db, { name: 'B', comfyJson: {}, params: [] })
+    expect(b.sortOrder).toBeGreaterThan(a.sortOrder)
+    expect(repo.listTemplates(db).map((t) => t.name)).toEqual(['A', 'B'])
+  })
+
+  it('reorderTemplates 持久化新顺序', () => {
+    const a = repo.createTemplate(db, { name: 'A', comfyJson: {}, params: [] })
+    const b = repo.createTemplate(db, { name: 'B', comfyJson: {}, params: [] })
+    const c = repo.createTemplate(db, { name: 'C', comfyJson: {}, params: [] })
+    expect(repo.reorderTemplates(db, [c.id, a.id, b.id])).toBe('ok')
+    expect(repo.listTemplates(db).map((t) => t.name)).toEqual(['C', 'A', 'B'])
+  })
+
+  it('reorderTemplates 拒绝未知 id 与不完整列表', () => {
+    const a = repo.createTemplate(db, { name: 'A', comfyJson: {}, params: [] })
+    repo.createTemplate(db, { name: 'B', comfyJson: {}, params: [] })
+    expect(repo.reorderTemplates(db, [a.id, 999])).toBe('unknown-id')
+    expect(repo.reorderTemplates(db, [a.id])).toBe('incomplete')
+    expect(repo.reorderTemplates(db, [a.id, a.id])).toBe('incomplete')
+  })
+})
+
+describe('sort_order migration', () => {
+  it('旧库(无 sort_order 列)打开时自动迁移并按 id 初始化', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cwe-mig-'))
+    const path = join(dir, 'old.db')
+    const raw = new Database(path)
+    raw.exec(`CREATE TABLE templates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      comfy_json TEXT NOT NULL,
+      params TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );`)
+    raw.prepare(`INSERT INTO templates (name, comfy_json, params) VALUES ('old', '{}', '[]')`).run()
+    raw.close()
+    const migrated = createDb(path)
+    const rows = repo.listTemplates(migrated)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.sortOrder).toBe(rows[0]!.id)
   })
 })
