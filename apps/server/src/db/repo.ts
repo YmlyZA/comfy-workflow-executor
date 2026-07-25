@@ -204,3 +204,15 @@ export function retryFailedJobs(db: Db, batchId: number): number {
     return res.changes
   })
 }
+
+/** 状态检查与删除同事务,避免与执行器认领竞态;jobs 无级联须先删 */
+export function deleteBatch(db: Db, id: number): 'ok' | 'not-found' | 'running' {
+  return db.transaction((tx) => {
+    const batch = tx.select().from(batches).where(eq(batches.id, id)).get()
+    if (!batch) return 'not-found'
+    if (batch.status === 'running') return 'running'
+    tx.delete(jobs).where(eq(jobs.batchId, id)).run()
+    tx.delete(batches).where(eq(batches.id, id)).run()
+    return 'ok'
+  })
+}
