@@ -28,6 +28,9 @@ beforeEach(() => {
     CLIPTextEncode: {
       input: { required: { text: ['STRING', { multiline: true }], clip: ['CLIP'] } },
     },
+    LoadImage: {
+      input: { required: { image: [['existing.png'], { image_upload: true }] } },
+    },
   }
   app = makeApp()
 })
@@ -119,6 +122,18 @@ describe('POST /api/comfy/validate', () => {
     const body = (await res.json()) as any
     expect(body.warnings).toEqual([])
     expect(body.enumInputs).toHaveLength(1)
+  })
+
+  it('image_upload 输入不算枚举也不警告(值在建批次时上传)', async () => {
+    const res = await app.request('/api/comfy/validate', {
+      method: 'POST', headers: H,
+      body: JSON.stringify({
+        '10': { class_type: 'LoadImage', inputs: { image: 'to-be-uploaded.png' } },
+      }),
+    })
+    const body = (await res.json()) as any
+    expect(body.enumInputs).toEqual([])
+    expect(body.warnings).toEqual([])
   })
 
   it('离线时 skipped=true', async () => {
