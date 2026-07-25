@@ -197,4 +197,26 @@ describe('executor', () => {
     const job = repo.getBatchDetail(db, b.id)!.jobs[0]!
     expect(job.status).toBe('succeeded')
   })
+
+  it('image 参数本地不存在时原样注入(引用 GPU 侧文件)', async () => {
+    const p = [
+      ...params,
+      { key: 'img', label: 'I', nodeId: '10', inputName: 'image', type: 'image' as const },
+    ]
+    seed([{ prompt: 'a', img: 'gpu-side.png' }], p)
+    await makeExecutor().runPendingOnce()
+    expect(comfy.uploads).toHaveLength(0)
+    expect(comfy.submitted[0]?.['10'].inputs.image).toBe('gpu-side.png')
+  })
+
+  it('image 参数含 .. 时不读本地原样传', async () => {
+    const p = [
+      ...params,
+      { key: 'img', label: 'I', nodeId: '10', inputName: 'image', type: 'image' as const },
+    ]
+    seed([{ prompt: 'a', img: '../secret.png' }], p)
+    await makeExecutor().runPendingOnce()
+    expect(comfy.uploads).toHaveLength(0)
+    expect(comfy.submitted[0]?.['10'].inputs.image).toBe('../secret.png')
+  })
 })

@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -151,6 +151,27 @@ describe('batches routes', () => {
     const retry = await app.request(`/api/batches/${batch.id}/retry-failed`, { method: 'POST', headers: H })
     expect(retry.status).toBe(200)
     expect(await retry.json()).toEqual({ retried: 0 })
+  })
+})
+
+describe('GET /api/uploads', () => {
+  it('目录不存在返回空;有文件按修改时间倒序且跳过子目录', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'cwe-ls-'))
+    const localApp = createApp({
+      config: loadConfig({ AUTH_TOKEN: 'secret', DATA_DIR: dataDir }),
+      db: createDb(':memory:'), comfy: null, events: new EventEmitter(),
+    })
+    expect(await (await localApp.request('/api/uploads', { headers: H })).json()).toEqual({ files: [] })
+
+    const dir = join(dataDir, 'uploads')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'a.png'), 'x')
+    const past = new Date(Date.now() - 60_000)
+    utimesSync(join(dir, 'a.png'), past, past)
+    writeFileSync(join(dir, 'b.png'), 'y')
+    mkdirSync(join(dir, 'sub'))
+    const res = (await (await localApp.request('/api/uploads', { headers: H })).json()) as { files: string[] }
+    expect(res.files).toEqual(['b.png', 'a.png'])
   })
 })
 

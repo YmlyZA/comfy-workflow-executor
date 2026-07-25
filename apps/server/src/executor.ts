@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { mkdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdirSync } from 'node:fs'
+import { isAbsolute, join } from 'node:path'
 import type { EventEmitter } from 'node:events'
 import { buildPrompt, type OutputFile } from '@cwe/shared'
 import type { ComfyClient, ComfyHistoryEntry } from './comfy/client.js'
@@ -107,7 +107,11 @@ export class Executor {
       if (def.type !== 'image') continue
       const v = values[def.key] ?? def.default
       if (typeof v === 'string' && v) {
-        values[def.key] = await this.comfy.uploadImage(join(this.dataDir, 'uploads', v))
+        const local = join(this.dataDir, 'uploads', v)
+        // 本地 uploads 有则上传替换;没有(或含 ../绝对路径)原样传,引用 GPU 侧 input 已有文件
+        if (!v.includes('..') && !isAbsolute(v) && existsSync(local)) {
+          values[def.key] = await this.comfy.uploadImage(local)
+        }
       }
     }
     const prompt = buildPrompt(template.comfyJson, template.params, values)

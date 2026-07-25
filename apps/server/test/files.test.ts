@@ -51,6 +51,17 @@ describe('uploads', () => {
     expect(body[1]?.name).toBe('dog.png')
     expect(body[0]?.stored).not.toBe(body[1]?.stored)
   })
+
+  it('folds consecutive dots in the stored filename', async () => {
+    const form = new FormData()
+    form.append('files', new Blob(['abc']), 'photo..final.png')
+    const res = await app.request('/api/uploads', { method: 'POST', headers: H, body: form })
+    expect(res.status).toBe(201)
+    const body = (await res.json()) as Array<{ name: string; stored: string }>
+    expect(body[0]?.name).toBe('photo..final.png')
+    expect(body[0]?.stored).not.toContain('..')
+    expect(body[0]?.stored).toMatch(/^[a-f0-9]{8}-photo\.final\.png$/)
+  })
 })
 
 describe('outputs static', () => {
