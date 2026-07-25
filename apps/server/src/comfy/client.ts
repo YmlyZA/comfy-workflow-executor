@@ -38,6 +38,8 @@ export interface ComfyClient {
   downloadOutput(ref: OutputRef, destPath: string): Promise<void>
   /** 全量节点定义,体积较大,调用方应走 ObjectInfoCache */
   getObjectInfo(): Promise<ObjectInfoMap>
+  /** 拉取 ComfyUI input 目录图片字节;404 返回 null。name 支持 sub/name.png 子目录写法 */
+  getInputImage(name: string): Promise<ArrayBuffer | null>
   /** 返回断开函数。连接失败时静默重试由调用方负责。 */
   connectEvents(clientId: string, onEvent: (e: ComfyWsEvent) => void): () => void
 }
@@ -129,6 +131,19 @@ export function createComfyClient(baseUrl: string): ComfyClient {
       const res = await fetch(`${http}/object_info`)
       if (!res.ok) throw new Error(`object_info failed: ${res.status}`)
       return (await res.json()) as ObjectInfoMap
+    },
+
+    async getInputImage(name) {
+      const idx = name.lastIndexOf('/')
+      const qs = new URLSearchParams({
+        filename: idx >= 0 ? name.slice(idx + 1) : name,
+        subfolder: idx >= 0 ? name.slice(0, idx) : '',
+        type: 'input',
+      })
+      const res = await fetch(`${http}/view?${qs}`)
+      if (res.status === 404) return null
+      if (!res.ok) throw new Error(`view failed: ${res.status}`)
+      return res.arrayBuffer()
     },
 
     async downloadOutput(ref, destPath) {

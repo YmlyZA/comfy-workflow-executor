@@ -20,6 +20,7 @@ export class FakeComfy implements ComfyClient {
 
   objectInfo: ObjectInfoMap = {}
   objectInfoCalls = 0
+  inputImages: Record<string, Buffer> = {}
 
   async isUp() {
     return this.up
@@ -56,6 +57,10 @@ export class FakeComfy implements ComfyClient {
   async getObjectInfo() {
     this.objectInfoCalls++
     return this.objectInfo
+  }
+  async getInputImage(name: string): Promise<ArrayBuffer | null> {
+    const buf = this.inputImages[name]
+    return buf ? (Uint8Array.from(buf).buffer as ArrayBuffer) : null
   }
   connectEvents() {
     return () => {}

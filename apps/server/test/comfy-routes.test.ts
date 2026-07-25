@@ -1,4 +1,7 @@
 import { EventEmitter } from 'node:events'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createApp } from '../src/app.js'
 import { loadConfig } from '../src/config.js'
@@ -6,6 +9,12 @@ import { createDb } from '../src/db/index.js'
 import { FakeComfy } from './fake-comfy.js'
 
 const H = { Authorization: 'Bearer secret', 'Content-Type': 'application/json' }
+
+/** 1×1 透明 PNG */
+const PNG_1X1 = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+)
 
 let comfy: FakeComfy
 let app: ReturnType<typeof createApp>
@@ -203,5 +212,52 @@ describe('GET /api/comfy/input-files', () => {
       throw new Error('down')
     }
     expect((await app.request('/api/comfy/input-files', { headers: H })).status).toBe(503)
+  })
+})
+
+describe('GET /api/comfy/image-dims', () => {
+  it('缺 name 返回 400', async () => {
+    expect((await app.request('/api/comfy/image-dims', { headers: H })).status).toBe(400)
+  })
+
+  it('本地 uploads 文件解析尺寸', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'cwe-dims-'))
+    mkdirSync(join(dataDir, 'uploads'), { recursive: true })
+    writeFileSync(join(dataDir, 'uploads', 'pic.png'), PNG_1X1)
+    const localApp = createApp({
+      config: loadConfig({ AUTH_TOKEN: 'secret', DATA_DIR: dataDir }),
+      db: createDb(':memory:'), comfy, events: new EventEmitter(),
+    })
+    const res = await localApp.request('/api/comfy/image-dims?name=pic.png', { headers: H })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ width: 1, height: 1 })
+  })
+
+  it('本地没有时走 GPU 侧文件', async () => {
+    comfy.inputImages['gpu.png'] = PNG_1X1
+    const res = await app.request('/api/comfy/image-dims?name=gpu.png', { headers: H })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ width: 1, height: 1 })
+  })
+
+  it('两边都没有返回 404', async () => {
+    expect((await app.request('/api/comfy/image-dims?name=nope.png', { headers: H })).status).toBe(404)
+  })
+
+  it('解析失败返回 404', async () => {
+    comfy.inputImages['bad.png'] = Buffer.from('not an image')
+    expect((await app.request('/api/comfy/image-dims?name=bad.png', { headers: H })).status).toBe(404)
+  })
+
+  it('本地没有且 comfy 未配置返回 503', async () => {
+    const res = await makeApp(false).request('/api/comfy/image-dims?name=x.png', { headers: H })
+    expect(res.status).toBe(503)
+  })
+
+  it('getInputImage 抛错(离线)返回 503', async () => {
+    comfy.getInputImage = async () => {
+      throw new Error('ECONNREFUSED')
+    }
+    expect((await app.request('/api/comfy/image-dims?name=x.png', { headers: H })).status).toBe(503)
   })
 })
