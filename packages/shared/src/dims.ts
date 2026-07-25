@@ -22,3 +22,13 @@ export function computeLockedDim(
   }
   return { width: round8((value * source.width) / source.height), height: value }
 }
+
+/** 跟随源图:两维就近取整到 8;超过最长边上限时先等比缩到上限(取整后允许 ≤4px 溢出) */
+export function fitSource(source: ImageDims, maxEdge?: number): ImageDims {
+  if (source.width <= 0 || source.height <= 0) {
+    throw new Error('source dims must be positive')
+  }
+  const longest = Math.max(source.width, source.height)
+  const scale = maxEdge && maxEdge > 0 && longest > maxEdge ? maxEdge / longest : 1
+  return { width: round8(source.width * scale), height: round8(source.height * scale) }
+}

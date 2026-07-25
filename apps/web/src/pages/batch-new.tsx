@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import Papa from 'papaparse'
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { computeLockedDim, expandMatrix, type ParamValues } from '@cwe/shared'
+import { computeLockedDim, expandMatrix, fitSource, type ParamValues } from '@cwe/shared'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -26,6 +26,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { ImageValueControl } from '@/components/image-value-control'
 import { api } from '@/lib/api'
 import { useImageDims } from '@/hooks/use-image-dims'
+import { useDebouncedValue } from '@/hooks/use-debounced-value'
 import { useInputOptions } from '@/hooks/use-input-options'
 import { useUploadFiles } from '@/hooks/use-upload-files'
 import { useComfyInputFiles } from '@/hooks/use-comfy-input-files'
@@ -147,11 +148,21 @@ function TableEntry({
   const [error, setError] = useState('')
   const dimPair = findDimPair(template.params)
   const imageParam = template.params.find((p) => p.type === 'image')
-  const [lockRatio, setLockRatio] = useState(false)
+  const [sizeMode, setSizeMode] = useState<SizeMode>('default')
+  const [capText, setCapText] = useState('')
+
+  // rows → jobs 同步(过滤空行);全量 update 与函数式 patchRow 都经这里通知父级
+  useEffect(() => {
+    onChange(rows.filter((r) => Object.keys(r).length > 0))
+  }, [rows, onChange])
 
   function update(next: ParamValues[]) {
     setRows(next)
-    onChange(next.filter((r) => Object.keys(r).length > 0))
+  }
+
+  /** 行内补丁:函数式更新,同一批次多个 SourceDimCell 补丁不会互相覆盖 */
+  function patchRow(i: number, patch: Record<string, string | number>) {
+    setRows((prev) => prev.map((r, j) => (j === i ? { ...r, ...patch } : r)))
   }
 
   function importCsv() {
@@ -175,14 +186,29 @@ function TableEntry({
   return (
     <div className="space-y-2">
       {dimPair && imageParam && (
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={lockRatio}
-            onChange={(e) => setLockRatio(e.target.checked)}
-          />
-          锁定源图比例（填 {dimPair.width.key} 或 {dimPair.height.key} 自动按该行图片比例算另一个）
-        </label>
+        <div className="flex items-center gap-2 text-sm">
+          <Label>输出尺寸</Label>
+          <Select value={sizeMode} onValueChange={(v) => setSizeMode(v as SizeMode)}>
+            <SelectTrigger className="h-8 w-64">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="default">模板默认</SelectItem>
+              <SelectItem value="ratio">锁定比例（填一边自动算另一边）</SelectItem>
+              <SelectItem value="source">跟随源图（选图自动填宽高）</SelectItem>
+            </SelectContent>
+          </Select>
+          {sizeMode === 'source' && (
+            <Input
+              className="h-8 w-56"
+              type="number"
+              min={8}
+              placeholder="最长边上限（留空=与源图一致）"
+              value={capText}
+              onChange={(e) => setCapText(e.target.value)}
+            />
+          )}
+        </div>
       )}
       <Table>
         <TableHeader>
@@ -207,18 +233,24 @@ function TableEntry({
                         update(next)
                       }}
                     />
-                  ) : lockRatio && dimPair && imageParam && (p.key === dimPair.width.key || p.key === dimPair.height.key) ? (
+                  ) : sizeMode === 'ratio' && dimPair && imageParam && (p.key === dimPair.width.key || p.key === dimPair.height.key) ? (
                     <DimCell
                       p={p}
                       otherKey={p.key === dimPair.width.key ? dimPair.height.key : dimPair.width.key}
                       driver={p.key === dimPair.width.key ? 'width' : 'height'}
                       imageName={String(row[imageParam.key] ?? imageParam.default ?? '')}
-                      locked={lockRatio}
+                      locked={sizeMode === 'ratio'}
                       value={String(row[p.key] ?? '')}
-                      onPatch={(patch) => {
-                        const next = rows.map((r, j) => (j === i ? { ...r, ...patch } : r))
-                        update(next)
-                      }}
+                      onPatch={(patch) => patchRow(i, patch)}
+                    />
+                  ) : sizeMode === 'source' && dimPair && imageParam && p.key === dimPair.width.key ? (
+                    <SourceDimCell
+                      p={p}
+                      heightKey={dimPair.height.key}
+                      imageName={String(row[imageParam.key] ?? '')}
+                      cap={parseCap(capText)}
+                      value={String(row[p.key] ?? '')}
+                      onPatch={(patch) => patchRow(i, patch)}
                     />
                   ) : p.type === 'enum' ? (
                     <EnumValueSelect
@@ -354,9 +386,10 @@ function ImagesEntry({
   const [error, setError] = useState('')
 
   const dimPair = findDimPair(template.params)
-  const [lockRatio, setLockRatio] = useState(false)
+  const [sizeMode, setSizeMode] = useState<SizeMode>('default')
   const [driver, setDriver] = useState<'width' | 'height'>('width')
   const [driverValue, setDriverValue] = useState('')
+  const [capText, setCapText] = useState('')
   const [dimsWarning, setDimsWarning] = useState('')
 
   async function onFiles(files: FileList) {
@@ -365,7 +398,7 @@ function ImagesEntry({
     setDimsWarning('')
     try {
       const n = Number(driverValue)
-      if (lockRatio && dimPair && (!driverValue || Number.isNaN(n) || n <= 0)) {
+      if (sizeMode === 'ratio' && dimPair && (!driverValue || Number.isNaN(n) || n <= 0)) {
         setError('锁定比例后需先填写有效的宽或高数值')
         return
       }
@@ -375,7 +408,7 @@ function ImagesEntry({
         method: 'POST',
         body: form,
       })
-      if (lockRatio && dimPair) {
+      if (sizeMode !== 'default' && dimPair) {
         const results = await Promise.allSettled(
           stored.map((s) =>
             api<{ width: number; height: number }>(
@@ -383,6 +416,7 @@ function ImagesEntry({
             ),
           ),
         )
+        const cap = parseCap(capText)
         let failed = 0
         const jobs = stored.map((s, i) => {
           const r = results[i]!
@@ -390,7 +424,8 @@ function ImagesEntry({
           delete base[dimPair.width.key]
           delete base[dimPair.height.key]
           if (r.status === 'fulfilled') {
-            const d = computeLockedDim(r.value, driver, n)
+            const d =
+              sizeMode === 'ratio' ? computeLockedDim(r.value, driver, n) : fitSource(r.value, cap)
             return { ...base, [dimPair.width.key]: d.width, [dimPair.height.key]: d.height }
           }
           failed++
@@ -433,15 +468,20 @@ function ImagesEntry({
       )}
       {dimPair && (
         <div className="space-y-2 rounded-md border p-3">
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={lockRatio}
-              onChange={(e) => setLockRatio(e.target.checked)}
-            />
-            锁定源图比例（每张图按各自比例计算另一维）
-          </label>
-          {lockRatio && (
+          <div className="flex items-center gap-2">
+            <Label>输出尺寸</Label>
+            <Select value={sizeMode} onValueChange={(v) => setSizeMode(v as SizeMode)}>
+              <SelectTrigger className="w-56">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="default">模板默认</SelectItem>
+                <SelectItem value="ratio">锁定比例（填一边）</SelectItem>
+                <SelectItem value="source">跟随源图</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {sizeMode === 'ratio' && (
             <div className="flex items-center gap-2">
               <Select value={driver} onValueChange={(v) => setDriver(v as 'width' | 'height')}>
                 <SelectTrigger className="w-32">
@@ -463,6 +503,19 @@ function ImagesEntry({
               <Input className="w-40" disabled placeholder="另一维自动（按源图比例）" value="" readOnly />
             </div>
           )}
+          {sizeMode === 'source' && (
+            <div className="flex items-center gap-2">
+              <Input
+                className="w-56"
+                type="number"
+                min={8}
+                placeholder="最长边上限（留空=与源图一致）"
+                value={capText}
+                onChange={(e) => setCapText(e.target.value)}
+              />
+              <Input className="w-40" disabled placeholder="宽高自动（跟随源图）" value="" readOnly />
+            </div>
+          )}
         </div>
       )}
       <div className="grid grid-cols-2 gap-4">
@@ -470,7 +523,7 @@ function ImagesEntry({
           .filter(
             (p) =>
               !(
-                lockRatio &&
+                sizeMode !== 'default' &&
                 dimPair &&
                 (p.key === dimPair.width.key || p.key === dimPair.height.key)
               ),
@@ -509,6 +562,15 @@ function ImagesEntry({
       {dimsWarning && <p className="text-sm text-muted-foreground">⚠ {dimsWarning}</p>}
     </div>
   )
+}
+
+/** 输出尺寸模式:模板默认 / 锁定比例(填一边) / 跟随源图(可选最长边上限) */
+type SizeMode = 'default' | 'ratio' | 'source'
+
+/** 最长边上限解析:空/非法/小于 8 视为未填 */
+function parseCap(text: string): number | undefined {
+  const n = Number(text)
+  return text.trim() !== '' && !Number.isNaN(n) && n >= 8 ? n : undefined
 }
 
 /** 第一对 inputName 为 width/height 的 number 参数;凑不齐返回 null */
@@ -768,6 +830,46 @@ function DimCell({
             onPatch({ [p.key]: raw })
           }
         }}
+      />
+      {failed && <p className="text-xs text-muted-foreground">{dimsErrorText(dims.error)}</p>}
+    </div>
+  )
+}
+
+/** 跟随源图模式的宽格:该行图片(或上限)变化后探测尺寸,把宽高两格一起写入;仍可手改 */
+function SourceDimCell({
+  p,
+  heightKey,
+  imageName,
+  cap,
+  value,
+  onPatch,
+}: {
+  p: ParamDef
+  heightKey: string
+  imageName: string
+  cap: number | undefined
+  value: string
+  onPatch: (patch: Record<string, string | number>) => void
+}) {
+  const debouncedName = useDebouncedValue(imageName)
+  const dims = useImageDims(debouncedName || undefined)
+  const patchRef = useRef(onPatch)
+  patchRef.current = onPatch
+  useEffect(() => {
+    if (dims.data) {
+      const d = fitSource(dims.data, cap)
+      patchRef.current({ [p.key]: d.width, [heightKey]: d.height })
+    }
+  }, [dims.data, cap, p.key, heightKey])
+  const failed = !!imageName && dims.isError
+  return (
+    <div className="space-y-1">
+      <Input
+        className="h-8"
+        placeholder={String(p.default ?? '')}
+        value={value}
+        onChange={(e) => onPatch({ [p.key]: e.target.value })}
       />
       {failed && <p className="text-xs text-muted-foreground">{dimsErrorText(dims.error)}</p>}
     </div>
