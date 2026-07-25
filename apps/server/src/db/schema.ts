@@ -8,6 +8,7 @@ export const templates = sqliteTable('templates', {
   comfyJson: text('comfy_json', { mode: 'json' }).$type<Record<string, any>>().notNull(),
   params: text('params', { mode: 'json' }).$type<ParamDef[]>().notNull(),
   createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+  sortOrder: integer('sort_order').notNull().default(0),
 })
 
 export const batches = sqliteTable('batches', {
