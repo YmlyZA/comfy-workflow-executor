@@ -111,6 +111,7 @@ export default function TemplatesPage() {
       if (ctx?.prev) qc.setQueryData(['templates'], ctx.prev)
       setBanner(`排序保存失败：${apiErrorText(e)}`)
     },
+    onSuccess: () => setBanner(''),
     onSettled: () => qc.invalidateQueries({ queryKey: ['templates'] }),
   })
 

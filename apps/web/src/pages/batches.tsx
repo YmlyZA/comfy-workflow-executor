@@ -209,10 +209,24 @@ function BatchesBulkActions({
   const selected = table.getFilteredSelectedRowModel().rows.map((r) => r.original)
   const actions = batchBulkActions(selected)
 
-  async function run(action: string, filter: (b: BatchSummaryDto) => boolean, fn: (b: BatchSummaryDto) => Promise<unknown>) {
+  async function run(
+    action: string,
+    filter: (b: BatchSummaryDto) => boolean,
+    fn: (b: BatchSummaryDto) => Promise<unknown>,
+    extra?: () => string,
+  ) {
     const targets = selected.filter(filter)
     const r = await runBulk(targets, (b) => b.name, fn)
-    onDone(summarizeBulk(action, r))
+    const mappedFailed = r.failed.map((f) => ({
+      ...f,
+      message: f.message === 'batch is running' ? '运行中，先取消再删' : f.message,
+    }))
+    let msg = summarizeBulk(action, { ok: r.ok, failed: mappedFailed })
+    if (extra) {
+      const suffix = extra()
+      if (suffix) msg += suffix
+    }
+    onDone(msg)
     table.resetRowSelection()
     void qc.invalidateQueries({ queryKey: ['batches'] })
   }
@@ -268,14 +282,24 @@ function BatchesBulkActions({
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() =>
-                run(
+              onClick={() => {
+                const purgeFailures: string[] = []
+                void run(
                   '删除',
                   () => true,
-                  (b) =>
-                    api(`/batches/${b.id}${purge ? '?purgeOutputs=1' : ''}`, { method: 'DELETE' }),
+                  async (b) => {
+                    const res = await api<{ ok: true; purgeFailed?: boolean }>(
+                      `/batches/${b.id}${purge ? '?purgeOutputs=1' : ''}`,
+                      { method: 'DELETE' },
+                    )
+                    if (res.purgeFailed) purgeFailures.push(b.name)
+                  },
+                  () =>
+                    purgeFailures.length > 0
+                      ? `；${purgeFailures.join('、')} 记录已删，但输出目录清理失败`
+                      : '',
                 )
-              }
+              }}
             >
               删除
             </AlertDialogAction>
