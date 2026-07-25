@@ -28,6 +28,16 @@ describe('ObjectInfoCache', () => {
     expect(comfy.objectInfoCalls).toBe(2)
   })
 
+  it('并发请求共享同一次拉取(dogpile 保护)', async () => {
+    const comfy = new FakeComfy()
+    comfy.objectInfo = { KSampler: {} }
+    const cache = new ObjectInfoCache(comfy, 60_000)
+    const [a, b] = await Promise.all([cache.get(), cache.get(), cache.get()])
+    expect(comfy.objectInfoCalls).toBe(1)
+    expect(a).toEqual({ KSampler: {} })
+    expect(b).toBe(a)
+  })
+
   it('拉取失败时不缓存错误,下次重试', async () => {
     const comfy = new FakeComfy()
     let fail = true

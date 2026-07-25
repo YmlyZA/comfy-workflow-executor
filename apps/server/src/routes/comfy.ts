@@ -24,6 +24,9 @@ export function comfyRoutes(deps: AppDeps) {
     if (!graph || !Array.isArray(graph.nodes) || !Array.isArray(graph.links)) {
       return c.json({ error: '不是 UI 格式的 workflow JSON(缺少 nodes/links)' }, 400)
     }
+    if (!graph.nodes.every((n) => n && typeof n === 'object' && !Array.isArray(n))) {
+      return c.json({ error: 'workflow JSON 的 nodes 含非法元素' }, 400)
+    }
     const info = await objectInfo(c.req.query('refresh') === '1')
     if (!info) return c.json({ error: 'UI 格式转换需要 ComfyUI 在线' }, 503)
     try {

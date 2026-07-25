@@ -61,7 +61,8 @@ export default function TemplateImportPage() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
-  async function ingest(parsed: unknown, sourceName: string) {
+  /** 返回是否成功导入(被更新的导入取代视为不成功,但不写任何状态) */
+  async function ingest(parsed: unknown, sourceName: string): Promise<boolean> {
     const seq = ++importSeq.current
     setError('')
     setValidation(null)
@@ -74,7 +75,7 @@ export default function TemplateImportPage() {
           method: 'POST',
           body: JSON.stringify(parsed),
         })
-        if (seq !== importSeq.current) return
+        if (seq !== importSeq.current) return false
         comfyJson = res.comfyJson
       } else if (format === 'api') {
         comfyJson = parsed as Record<string, any>
@@ -94,7 +95,7 @@ export default function TemplateImportPage() {
           method: 'POST',
           body: JSON.stringify(comfyJson),
         })
-        if (seq !== importSeq.current) return
+        if (seq !== importSeq.current) return false
         refs = new Map(
           v.enumInputs.map((e) => [`${e.nodeId}.${e.inputName}`, { classType: e.classType, inputName: e.inputName }]),
         )
@@ -108,7 +109,7 @@ export default function TemplateImportPage() {
         }
       }
 
-      if (seq !== importSeq.current) return
+      if (seq !== importSeq.current) return false
 
       const pre: Record<string, Selection> = {}
       for (const s of suggestParams(comfyJson)) {
@@ -128,10 +129,12 @@ export default function TemplateImportPage() {
         ),
       )
       if (!name && sourceName) setName(sourceName)
+      return true
     } catch (e) {
       if (seq === importSeq.current) {
         setError(apiErrorMessage(e))
       }
+      return false
     } finally {
       if (seq === importSeq.current) {
         setBusy(false)
@@ -153,17 +156,23 @@ export default function TemplateImportPage() {
         await ingest(JSON.parse(await file.text()), file.name.replace(/\.json$/i, ''))
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : '导入失败')
+      if (e instanceof SyntaxError) {
+        setError('JSON 解析失败:文件内容(或 PNG 内嵌 workflow)不是合法 JSON')
+      } else {
+        setError(e instanceof Error ? e.message : '导入失败')
+      }
     }
   }
 
   async function importPaste() {
+    let parsed: unknown
     try {
-      await ingest(JSON.parse(pasteText), '')
-      setPasteOpen(false)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'JSON 解析失败')
+      parsed = JSON.parse(pasteText)
+    } catch {
+      setError('JSON 解析失败,请检查粘贴的内容')
+      return
     }
+    if (await ingest(parsed, '')) setPasteOpen(false)
   }
 
   const save = useMutation({

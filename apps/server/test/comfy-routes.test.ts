@@ -55,6 +55,13 @@ describe('POST /api/comfy/convert', () => {
     expect(res.status).toBe(400)
   })
 
+  it('nodes 含非法元素返回 400 而非 500', async () => {
+    const res = await app.request('/api/comfy/convert', {
+      method: 'POST', headers: H, body: JSON.stringify({ nodes: [null], links: [] }),
+    })
+    expect(res.status).toBe(400)
+  })
+
   it('comfy 未配置返回 503', async () => {
     const res = await makeApp(false).request('/api/comfy/convert', {
       method: 'POST', headers: H, body: JSON.stringify(graph),

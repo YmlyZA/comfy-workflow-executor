@@ -383,6 +383,18 @@ function ImagesEntry({
   )
 }
 
+/** input-options 失败时的降级提示:优先用服务器返回的错误(离线 503 / 已非枚举 404 文案不同) */
+function optionsErrorText(error: unknown, suffix: string): string {
+  const msg = error instanceof Error ? error.message : ''
+  try {
+    const parsed = JSON.parse(msg) as { error?: string }
+    if (parsed.error) return `${parsed.error},${suffix}`
+  } catch {
+    // 非 JSON 报错(网络异常等)走默认文案
+  }
+  return `ComfyUI 离线,${suffix}`
+}
+
 /** enum 参数单选:可选值来自服务器;离线/失败降级为文本输入 */
 function EnumValueSelect({
   param,
@@ -393,12 +405,12 @@ function EnumValueSelect({
   value: string
   onChange: (v: string) => void
 }) {
-  const { data, isError } = useInputOptions(param)
+  const { data, isError, error } = useInputOptions(param)
   if (!data || isError) {
     return (
       <Input
         className="h-8"
-        placeholder={isError ? 'ComfyUI 离线,手动输入' : String(param.default ?? '')}
+        placeholder={isError ? optionsErrorText(error, '手动输入') : String(param.default ?? '')}
         value={value}
         onChange={(e) => onChange(e.target.value)}
       />
@@ -430,12 +442,12 @@ function EnumAxisPick({
   text: string
   onChange: (v: string) => void
 }) {
-  const { data, isError } = useInputOptions(param)
+  const { data, isError, error } = useInputOptions(param)
   if (!data || isError) {
     return (
       <Textarea
         rows={4}
-        placeholder={isError ? 'ComfyUI 离线,一行一个值' : undefined}
+        placeholder={isError ? optionsErrorText(error, '一行一个值') : undefined}
         value={text}
         onChange={(e) => onChange(e.target.value)}
       />
