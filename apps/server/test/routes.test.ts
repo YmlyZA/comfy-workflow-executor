@@ -68,6 +68,39 @@ describe('templates routes', () => {
   })
 })
 
+describe('PATCH /api/templates/order', () => {
+  it('重排后 GET 按新顺序返回', async () => {
+    const a = await createTemplate()
+    const res2 = await app.request('/api/templates', {
+      method: 'POST', headers: H,
+      body: JSON.stringify({ ...templateBody, name: 'T2' }),
+    })
+    const b = (await res2.json()) as { id: number }
+    const patch = await app.request('/api/templates/order', {
+      method: 'PATCH', headers: H, body: JSON.stringify({ ids: [b.id, a.id] }),
+    })
+    expect(patch.status).toBe(200)
+    const list = (await (await app.request('/api/templates', { headers: H })).json()) as any[]
+    expect(list.map((t) => t.id)).toEqual([b.id, a.id])
+  })
+
+  it('非法 body 400, 未知 id 404, 不完整 400', async () => {
+    const a = await createTemplate()
+    const bad = await app.request('/api/templates/order', {
+      method: 'PATCH', headers: H, body: JSON.stringify({ ids: 'x' }),
+    })
+    expect(bad.status).toBe(400)
+    const unknown = await app.request('/api/templates/order', {
+      method: 'PATCH', headers: H, body: JSON.stringify({ ids: [a.id, 999] }),
+    })
+    expect(unknown.status).toBe(404)
+    const incomplete = await app.request('/api/templates/order', {
+      method: 'PATCH', headers: H, body: JSON.stringify({ ids: [] }),
+    })
+    expect(incomplete.status).toBe(400)
+  })
+})
+
 describe('batches routes', () => {
   it('creates batch with jobs and reads detail', async () => {
     const t = await createTemplate()

@@ -8,6 +8,19 @@ export function templateRoutes(deps: AppDeps) {
 
   app.get('/', (c) => c.json(repo.listTemplates(deps.db)))
 
+  app.patch('/order', async (c) => {
+    const body = (await c.req.json()) as { ids?: unknown }
+    const ids =
+      Array.isArray(body?.ids) && body.ids.every((n): n is number => typeof n === 'number')
+        ? body.ids
+        : null
+    if (!ids) return c.json({ error: 'ids 必须是数字数组' }, 400)
+    const res = repo.reorderTemplates(deps.db, ids)
+    if (res === 'unknown-id') return c.json({ error: '包含不存在的模板 id' }, 404)
+    if (res === 'incomplete') return c.json({ error: 'ids 必须包含全部模板且不重复' }, 400)
+    return c.json({ ok: true })
+  })
+
   app.post('/', async (c) => {
     const input = createTemplateSchema.parse(await c.req.json())
     return c.json(repo.createTemplate(deps.db, input), 201)

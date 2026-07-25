@@ -8,11 +8,21 @@ const now = () => new Date().toISOString()
 // -- templates --
 
 export function createTemplate(db: Db, input: CreateTemplateInput): Template {
-  return db.insert(templates).values(input).returning().get()
+  return db.transaction((tx) => {
+    const max = tx
+      .select({ m: sql<number>`coalesce(max(${templates.sortOrder}), 0)` })
+      .from(templates)
+      .get()
+    return tx
+      .insert(templates)
+      .values({ ...input, sortOrder: (max?.m ?? 0) + 1 })
+      .returning()
+      .get()
+  })
 }
 
 export function listTemplates(db: Db): Template[] {
-  return db.select().from(templates).orderBy(asc(templates.id)).all()
+  return db.select().from(templates).orderBy(asc(templates.sortOrder), asc(templates.id)).all()
 }
 
 export function getTemplate(db: Db, id: number): Template | undefined {
@@ -21,6 +31,20 @@ export function getTemplate(db: Db, id: number): Template | undefined {
 
 export function deleteTemplate(db: Db, id: number): void {
   db.delete(templates).where(eq(templates.id, id)).run()
+}
+
+/** 全量重排:ids 必须恰好覆盖全部模板且不重复 */
+export function reorderTemplates(db: Db, ids: number[]): 'ok' | 'unknown-id' | 'incomplete' {
+  return db.transaction((tx) => {
+    const existing = tx.select({ id: templates.id }).from(templates).all().map((r) => r.id)
+    const known = new Set(existing)
+    if (ids.some((id) => !known.has(id))) return 'unknown-id'
+    if (ids.length !== existing.length || new Set(ids).size !== ids.length) return 'incomplete'
+    ids.forEach((id, i) => {
+      tx.update(templates).set({ sortOrder: i + 1 }).where(eq(templates.id, id)).run()
+    })
+    return 'ok'
+  })
 }
 
 // -- batches --

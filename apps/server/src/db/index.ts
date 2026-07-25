@@ -8,7 +8,8 @@ CREATE TABLE IF NOT EXISTS templates (
   name TEXT NOT NULL,
   comfy_json TEXT NOT NULL,
   params TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  sort_order INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS batches (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -38,6 +39,12 @@ export function createDb(path: string) {
   sqlite.pragma('journal_mode = WAL')
   sqlite.pragma('foreign_keys = ON')
   sqlite.exec(DDL)
+  // 旧库迁移:补 sort_order 列并按 id 初始化(保持既有展示顺序)
+  const cols = sqlite.prepare(`PRAGMA table_info(templates)`).all() as Array<{ name: string }>
+  if (!cols.some((c) => c.name === 'sort_order')) {
+    sqlite.exec(`ALTER TABLE templates ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`)
+    sqlite.exec(`UPDATE templates SET sort_order = id`)
+  }
   return drizzle(sqlite, { schema })
 }
 
