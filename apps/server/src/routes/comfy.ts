@@ -1,9 +1,13 @@
+import { existsSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
+import { isAbsolute, join } from 'node:path'
 import { Hono } from 'hono'
 import type { AppDeps } from '../app.js'
 import { ConvertError, convertGraphToApi, type GraphJson } from '../comfy/graph-convert.js'
 import { ObjectInfoCache } from '../comfy/object-info-cache.js'
 import type { ObjectInfoMap } from '../comfy/client.js'
 import { enumOptions, validateApiJson } from '../comfy/validate.js'
+import { imageSize } from 'image-size'
 
 export function comfyRoutes(deps: AppDeps) {
   const app = new Hono()
@@ -63,6 +67,34 @@ export function comfyRoutes(deps: AppDeps) {
     const spec = info.LoadImage?.input?.required?.image
     const files = Array.isArray(spec?.[0]) ? (spec[0] as unknown[]).map(String) : []
     return c.json({ files })
+  })
+
+  /** 图片尺寸探测:uploads 本地优先,回退 GPU 侧;与执行器存在性回退同语义 */
+  app.get('/image-dims', async (c) => {
+    const name = c.req.query('name') ?? ''
+    if (!name) return c.json({ error: '缺少 name 参数' }, 400)
+    let bytes: Uint8Array | null = null
+    const local = join(deps.config.dataDir, 'uploads', name)
+    if (!name.includes('..') && !isAbsolute(name) && existsSync(local)) {
+      bytes = await readFile(local)
+    } else if (deps.comfy) {
+      try {
+        const buf = await deps.comfy.getInputImage(name)
+        if (buf) bytes = new Uint8Array(buf)
+      } catch {
+        return c.json({ error: 'ComfyUI 离线,无法探测 GPU 侧图片尺寸' }, 503)
+      }
+    } else {
+      return c.json({ error: 'ComfyUI 离线,无法探测 GPU 侧图片尺寸' }, 503)
+    }
+    if (!bytes) return c.json({ error: '图片不存在' }, 404)
+    try {
+      const dims = imageSize(bytes)
+      if (!dims.width || !dims.height) throw new Error('no dims')
+      return c.json({ width: dims.width, height: dims.height })
+    } catch {
+      return c.json({ error: '无法解析图片尺寸' }, 404)
+    }
   })
 
   return app
