@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import Papa from 'papaparse'
 import { useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { expandMatrix, type ParamValues } from '@cwe/shared'
+import { computeLockedDim, expandMatrix, type ParamValues } from '@cwe/shared'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -25,6 +25,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { ImageValueControl } from '@/components/image-value-control'
 import { api } from '@/lib/api'
+import { useImageDims } from '@/hooks/use-image-dims'
 import { useInputOptions } from '@/hooks/use-input-options'
 import { useUploadFiles } from '@/hooks/use-upload-files'
 import { useComfyInputFiles } from '@/hooks/use-comfy-input-files'
@@ -144,6 +145,9 @@ function TableEntry({
   const [csvOpen, setCsvOpen] = useState(false)
   const [csvText, setCsvText] = useState('')
   const [error, setError] = useState('')
+  const dimPair = findDimPair(template.params)
+  const imageParam = template.params.find((p) => p.type === 'image')
+  const [lockRatio, setLockRatio] = useState(false)
 
   function update(next: ParamValues[]) {
     setRows(next)
@@ -170,6 +174,16 @@ function TableEntry({
 
   return (
     <div className="space-y-2">
+      {dimPair && imageParam && (
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={lockRatio}
+            onChange={(e) => setLockRatio(e.target.checked)}
+          />
+          锁定源图比例（填 {dimPair.width.key} 或 {dimPair.height.key} 自动按该行图片比例算另一个）
+        </label>
+      )}
       <Table>
         <TableHeader>
           <TableRow>
@@ -190,6 +204,19 @@ function TableEntry({
                       placeholder={String(p.default ?? '')}
                       onChange={(v) => {
                         const next = rows.map((r, j) => (j === i ? { ...r, [p.key]: v } : r))
+                        update(next)
+                      }}
+                    />
+                  ) : lockRatio && dimPair && imageParam && (p.key === dimPair.width.key || p.key === dimPair.height.key) ? (
+                    <DimCell
+                      p={p}
+                      otherKey={p.key === dimPair.width.key ? dimPair.height.key : dimPair.width.key}
+                      driver={p.key === dimPair.width.key ? 'width' : 'height'}
+                      imageName={String(row[imageParam.key] ?? imageParam.default ?? '')}
+                      locked={lockRatio}
+                      value={String(row[p.key] ?? '')}
+                      onPatch={(patch) => {
+                        const next = rows.map((r, j) => (j === i ? { ...r, ...patch } : r))
                         update(next)
                       }}
                     />
@@ -400,6 +427,25 @@ function ImagesEntry({
   )
 }
 
+/** 第一对 inputName 为 width/height 的 number 参数;凑不齐返回 null */
+function findDimPair(params: ParamDef[]): { width: ParamDef; height: ParamDef } | null {
+  const width = params.find((p) => p.type === 'number' && p.inputName === 'width')
+  const height = params.find((p) => p.type === 'number' && p.inputName === 'height')
+  return width && height ? { width, height } : null
+}
+
+/** image-dims 失败提示:优先服务器错误文案 */
+function dimsErrorText(error: unknown): string {
+  const msg = error instanceof Error ? error.message : ''
+  try {
+    const parsed = JSON.parse(msg) as { error?: string }
+    if (parsed.error) return parsed.error
+  } catch {
+    // 非 JSON 报错走默认文案
+  }
+  return '无法获取源图尺寸'
+}
+
 /** input-options 失败时的降级提示:优先用服务器返回的错误(离线 503 / 已非枚举 404 文案不同) */
 function optionsErrorText(error: unknown, suffix: string): string {
   const msg = error instanceof Error ? error.message : ''
@@ -595,6 +641,51 @@ function ImageAxisPick({
         onChange={(e) => onChange(e.target.value)}
         placeholder="也可手填,一行一个文件名"
       />
+    </div>
+  )
+}
+
+/** 锁定比例时的宽/高单元格:编辑本格后按该行图片实际比例自动填另一格 */
+function DimCell({
+  p,
+  otherKey,
+  driver,
+  imageName,
+  locked,
+  value,
+  onPatch,
+}: {
+  p: ParamDef
+  otherKey: string
+  driver: 'width' | 'height'
+  imageName: string
+  locked: boolean
+  value: string
+  onPatch: (patch: Record<string, string | number>) => void
+}) {
+  const dims = useImageDims(locked && imageName ? imageName : undefined)
+  const failed = locked && !!imageName && dims.isError
+  return (
+    <div className="space-y-1">
+      <Input
+        className="h-8"
+        placeholder={String(p.default ?? '')}
+        value={value}
+        onChange={(e) => {
+          const raw = e.target.value
+          const n = Number(raw)
+          if (locked && dims.data && raw !== '' && !Number.isNaN(n) && n > 0) {
+            const computed = computeLockedDim(dims.data, driver, n)
+            onPatch({
+              [p.key]: raw,
+              [otherKey]: driver === 'width' ? computed.height : computed.width,
+            })
+          } else {
+            onPatch({ [p.key]: raw })
+          }
+        }}
+      />
+      {failed && <p className="text-xs text-muted-foreground">{dimsErrorText(dims.error)}</p>}
     </div>
   )
 }
