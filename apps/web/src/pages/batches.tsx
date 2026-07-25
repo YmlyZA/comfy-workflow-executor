@@ -248,7 +248,7 @@ function BatchesBulkActions({
       >
         重试失败
       </Button>
-      <AlertDialog>
+      <AlertDialog onOpenChange={(open) => { if (!open) setPurge(false) }}>
         <AlertDialogTrigger asChild>
           <Button size="sm" variant="destructive" disabled={!actions.del}>
             删除所选（{selected.length}）
