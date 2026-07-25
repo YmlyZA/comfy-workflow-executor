@@ -24,7 +24,9 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { api } from '@/lib/api'
+import { useInputOptions } from '@/hooks/use-input-options'
 import type { TemplateDto } from '@/pages/templates'
+import type { ParamDef } from '@cwe/shared'
 
 export default function BatchNewPage() {
   const [search] = useSearchParams()
@@ -179,17 +181,28 @@ function TableEntry({
             <TableRow key={i}>
               {template.params.map((p) => (
                 <TableCell key={p.key}>
-                  <Input
-                    className="h-8"
-                    placeholder={String(p.default ?? '')}
-                    value={String(row[p.key] ?? '')}
-                    onChange={(e) => {
-                      const next = rows.map((r, j) =>
-                        j === i ? { ...r, [p.key]: e.target.value } : r,
-                      )
-                      update(next)
-                    }}
-                  />
+                  {p.type === 'enum' ? (
+                    <EnumValueSelect
+                      param={p}
+                      value={String(row[p.key] ?? '')}
+                      onChange={(v) => {
+                        const next = rows.map((r, j) => (j === i ? { ...r, [p.key]: v } : r))
+                        update(next)
+                      }}
+                    />
+                  ) : (
+                    <Input
+                      className="h-8"
+                      placeholder={String(p.default ?? '')}
+                      value={String(row[p.key] ?? '')}
+                      onChange={(e) => {
+                        const next = rows.map((r, j) =>
+                          j === i ? { ...r, [p.key]: e.target.value } : r,
+                        )
+                        update(next)
+                      }}
+                    />
+                  )}
                 </TableCell>
               ))}
               <TableCell>
@@ -259,11 +272,19 @@ function MatrixEntry({
             <Label>
               {p.key}（{p.type}，一行一个值{p.default !== undefined ? `，留空用默认 ${p.default}` : ''}）
             </Label>
-            <Textarea
-              rows={4}
-              value={axes[p.key] ?? ''}
-              onChange={(e) => setAxes((prev) => ({ ...prev, [p.key]: e.target.value }))}
-            />
+            {p.type === 'enum' ? (
+              <EnumAxisPick
+                param={p}
+                text={axes[p.key] ?? ''}
+                onChange={(v) => setAxes((prev) => ({ ...prev, [p.key]: v }))}
+              />
+            ) : (
+              <Textarea
+                rows={4}
+                value={axes[p.key] ?? ''}
+                onChange={(e) => setAxes((prev) => ({ ...prev, [p.key]: e.target.value }))}
+              />
+            )}
           </div>
         ))}
       </div>
@@ -333,11 +354,19 @@ function ImagesEntry({
         {otherParams.map((p) => (
           <div key={p.key} className="space-y-1">
             <Label>{p.key}（所有任务共享）</Label>
-            <Input
-              placeholder={String(p.default ?? '')}
-              value={String(shared[p.key] ?? '')}
-              onChange={(e) => setShared((prev) => ({ ...prev, [p.key]: e.target.value }))}
-            />
+            {p.type === 'enum' ? (
+              <EnumValueSelect
+                param={p}
+                value={String(shared[p.key] ?? '')}
+                onChange={(v) => setShared((prev) => ({ ...prev, [p.key]: v }))}
+              />
+            ) : (
+              <Input
+                placeholder={String(p.default ?? '')}
+                value={String(shared[p.key] ?? '')}
+                onChange={(e) => setShared((prev) => ({ ...prev, [p.key]: e.target.value }))}
+              />
+            )}
           </div>
         ))}
       </div>
@@ -350,6 +379,105 @@ function ImagesEntry({
       />
       {uploading && <p className="text-sm text-muted-foreground">上传中…</p>}
       {error && <p className="text-sm text-destructive">{error}</p>}
+    </div>
+  )
+}
+
+/** input-options 失败时的降级提示:优先用服务器返回的错误(离线 503 / 已非枚举 404 文案不同) */
+function optionsErrorText(error: unknown, suffix: string): string {
+  const msg = error instanceof Error ? error.message : ''
+  try {
+    const parsed = JSON.parse(msg) as { error?: string }
+    if (parsed.error) return `${parsed.error},${suffix}`
+  } catch {
+    // 非 JSON 报错(网络异常等)走默认文案
+  }
+  return `ComfyUI 离线,${suffix}`
+}
+
+/** enum 参数单选:可选值来自服务器;离线/失败降级为文本输入 */
+function EnumValueSelect({
+  param,
+  value,
+  onChange,
+}: {
+  param: ParamDef
+  value: string
+  onChange: (v: string) => void
+}) {
+  const { data, isError, error } = useInputOptions(param)
+  if (!data || isError) {
+    return (
+      <Input
+        className="h-8"
+        placeholder={isError ? optionsErrorText(error, '手动输入') : String(param.default ?? '')}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    )
+  }
+  return (
+    <Select value={value || undefined} onValueChange={onChange}>
+      <SelectTrigger className="h-8">
+        <SelectValue placeholder={String(param.default ?? '选择…')} />
+      </SelectTrigger>
+      <SelectContent>
+        {data.options.map((o) => (
+          <SelectItem key={o} value={o}>
+            {o}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
+
+/** enum 参数多选(矩阵轴):勾选项以换行拼接写回 axes,复用现有解析 */
+function EnumAxisPick({
+  param,
+  text,
+  onChange,
+}: {
+  param: ParamDef
+  text: string
+  onChange: (v: string) => void
+}) {
+  const { data, isError, error } = useInputOptions(param)
+  if (!data || isError) {
+    return (
+      <Textarea
+        rows={4}
+        placeholder={isError ? optionsErrorText(error, '一行一个值') : undefined}
+        value={text}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    )
+  }
+  const chosen = new Set(
+    text
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean),
+  )
+  return (
+    <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border p-2">
+      {data.options.map((o) => (
+        <label key={o} className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={chosen.has(o)}
+            onChange={(e) => {
+              const next = new Set(chosen)
+              if (e.target.checked) next.add(o)
+              else next.delete(o)
+              onChange([...next].join('\n'))
+            }}
+          />
+          <span className="truncate" title={o}>
+            {o}
+          </span>
+        </label>
+      ))}
     </div>
   )
 }

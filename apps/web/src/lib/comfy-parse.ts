@@ -28,3 +28,17 @@ export function guessType(row: NodeInputRow): ParamType {
   if (typeof row.value === 'number') return 'number'
   return 'text'
 }
+
+export type WorkflowFormat = 'graph' | 'api' | 'unknown'
+
+/** 区分 ComfyUI 的 UI/graph 导出与 API(prompt)导出 */
+export function detectFormat(json: unknown): WorkflowFormat {
+  if (!json || typeof json !== 'object' || Array.isArray(json)) return 'unknown'
+  const obj = json as Record<string, any>
+  if (Array.isArray(obj.nodes) && Array.isArray(obj.links)) return 'graph'
+  const nodes = Object.values(obj)
+  if (nodes.length > 0 && nodes.every((v) => v && typeof v === 'object' && typeof v.class_type === 'string')) {
+    return 'api'
+  }
+  return 'unknown'
+}

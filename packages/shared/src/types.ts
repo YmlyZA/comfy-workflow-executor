@@ -1,7 +1,14 @@
 import { z } from 'zod'
 
-export const paramTypeSchema = z.enum(['text', 'number', 'seed', 'image'])
+export const paramTypeSchema = z.enum(['text', 'number', 'seed', 'image', 'enum'])
 export type ParamType = z.infer<typeof paramTypeSchema>
+
+/** enum 参数指向的 object_info 输入(用于批量填参时拉取可选值) */
+export const enumRefSchema = z.object({
+  classType: z.string().min(1),
+  inputName: z.string().min(1),
+})
+export type EnumRef = z.infer<typeof enumRefSchema>
 
 export const paramDefSchema = z.object({
   key: z.string().min(1),
@@ -9,6 +16,7 @@ export const paramDefSchema = z.object({
   nodeId: z.string().min(1),
   inputName: z.string().min(1),
   type: paramTypeSchema,
+  enumRef: enumRefSchema.optional(),
   default: z.union([z.string(), z.number()]).optional(),
 })
 export type ParamDef = z.infer<typeof paramDefSchema>

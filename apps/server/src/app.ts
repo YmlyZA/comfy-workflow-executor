@@ -9,6 +9,7 @@ import { templateRoutes } from './routes/templates.js'
 import { batchRoutes } from './routes/batches.js'
 import { eventRoutes } from './routes/events.js'
 import { downloadRoute, outputRoutes, uploadRoutes } from './routes/files.js'
+import { comfyRoutes } from './routes/comfy.js'
 
 export interface AppDeps {
   config: Config
@@ -31,6 +32,7 @@ export function createApp(deps: AppDeps) {
   app.get('/api/health', async (c) =>
     c.json({ ok: true, comfy: deps.comfy ? await deps.comfy.isUp() : false }),
   )
+  app.route('/api/comfy', comfyRoutes(deps))
   app.route('/api/templates', templateRoutes(deps))
   app.route('/api/events', eventRoutes(deps))
   app.route('/api/uploads', uploadRoutes(deps))
