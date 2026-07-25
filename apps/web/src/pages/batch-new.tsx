@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
+import { ImageValueControl } from '@/components/image-value-control'
 import { api } from '@/lib/api'
 import { useInputOptions } from '@/hooks/use-input-options'
 import type { TemplateDto } from '@/pages/templates'
@@ -181,7 +182,16 @@ function TableEntry({
             <TableRow key={i}>
               {template.params.map((p) => (
                 <TableCell key={p.key}>
-                  {p.type === 'enum' ? (
+                  {p.type === 'image' ? (
+                    <ImageValueControl
+                      value={String(row[p.key] ?? '')}
+                      placeholder={String(p.default ?? '')}
+                      onChange={(v) => {
+                        const next = rows.map((r, j) => (j === i ? { ...r, [p.key]: v } : r))
+                        update(next)
+                      }}
+                    />
+                  ) : p.type === 'enum' ? (
                     <EnumValueSelect
                       param={p}
                       value={String(row[p.key] ?? '')}
