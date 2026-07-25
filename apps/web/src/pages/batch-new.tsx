@@ -499,7 +499,10 @@ function ImagesEntry({
         multiple
         accept="image/*"
         disabled={uploading}
-        onChange={(e) => e.target.files?.length && onFiles(e.target.files)}
+        onChange={(e) => {
+          if (e.target.files?.length) void onFiles(e.target.files)
+          e.target.value = ''
+        }}
       />
       {uploading && <p className="text-sm text-muted-foreground">上传中…</p>}
       {error && <p className="text-sm text-destructive">{error}</p>}

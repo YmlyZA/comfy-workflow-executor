@@ -260,4 +260,14 @@ describe('GET /api/comfy/image-dims', () => {
     }
     expect((await app.request('/api/comfy/image-dims?name=x.png', { headers: H })).status).toBe(503)
   })
+
+  it('name 含 .. 时跳过本地检查直接走 GPU 侧', async () => {
+    comfy.inputImages['../x.png'] = PNG_1X1
+    const res = await app.request(
+      `/api/comfy/image-dims?name=${encodeURIComponent('../x.png')}`,
+      { headers: H },
+    )
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ width: 1, height: 1 })
+  })
 })
