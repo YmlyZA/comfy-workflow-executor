@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import Papa from 'papaparse'
 import { useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { computeLockedDim, expandMatrix, type ParamValues } from '@cwe/shared'
+import { computeLockedDim, expandMatrix, fitSource, type ParamValues } from '@cwe/shared'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -354,9 +354,10 @@ function ImagesEntry({
   const [error, setError] = useState('')
 
   const dimPair = findDimPair(template.params)
-  const [lockRatio, setLockRatio] = useState(false)
+  const [sizeMode, setSizeMode] = useState<SizeMode>('default')
   const [driver, setDriver] = useState<'width' | 'height'>('width')
   const [driverValue, setDriverValue] = useState('')
+  const [capText, setCapText] = useState('')
   const [dimsWarning, setDimsWarning] = useState('')
 
   async function onFiles(files: FileList) {
@@ -365,7 +366,7 @@ function ImagesEntry({
     setDimsWarning('')
     try {
       const n = Number(driverValue)
-      if (lockRatio && dimPair && (!driverValue || Number.isNaN(n) || n <= 0)) {
+      if (sizeMode === 'ratio' && dimPair && (!driverValue || Number.isNaN(n) || n <= 0)) {
         setError('锁定比例后需先填写有效的宽或高数值')
         return
       }
@@ -375,7 +376,7 @@ function ImagesEntry({
         method: 'POST',
         body: form,
       })
-      if (lockRatio && dimPair) {
+      if (sizeMode !== 'default' && dimPair) {
         const results = await Promise.allSettled(
           stored.map((s) =>
             api<{ width: number; height: number }>(
@@ -383,6 +384,7 @@ function ImagesEntry({
             ),
           ),
         )
+        const cap = parseCap(capText)
         let failed = 0
         const jobs = stored.map((s, i) => {
           const r = results[i]!
@@ -390,7 +392,8 @@ function ImagesEntry({
           delete base[dimPair.width.key]
           delete base[dimPair.height.key]
           if (r.status === 'fulfilled') {
-            const d = computeLockedDim(r.value, driver, n)
+            const d =
+              sizeMode === 'ratio' ? computeLockedDim(r.value, driver, n) : fitSource(r.value, cap)
             return { ...base, [dimPair.width.key]: d.width, [dimPair.height.key]: d.height }
           }
           failed++
@@ -433,15 +436,20 @@ function ImagesEntry({
       )}
       {dimPair && (
         <div className="space-y-2 rounded-md border p-3">
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={lockRatio}
-              onChange={(e) => setLockRatio(e.target.checked)}
-            />
-            锁定源图比例（每张图按各自比例计算另一维）
-          </label>
-          {lockRatio && (
+          <div className="flex items-center gap-2">
+            <Label>输出尺寸</Label>
+            <Select value={sizeMode} onValueChange={(v) => setSizeMode(v as SizeMode)}>
+              <SelectTrigger className="w-56">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="default">模板默认</SelectItem>
+                <SelectItem value="ratio">锁定比例（填一边）</SelectItem>
+                <SelectItem value="source">跟随源图</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {sizeMode === 'ratio' && (
             <div className="flex items-center gap-2">
               <Select value={driver} onValueChange={(v) => setDriver(v as 'width' | 'height')}>
                 <SelectTrigger className="w-32">
@@ -463,6 +471,19 @@ function ImagesEntry({
               <Input className="w-40" disabled placeholder="另一维自动（按源图比例）" value="" readOnly />
             </div>
           )}
+          {sizeMode === 'source' && (
+            <div className="flex items-center gap-2">
+              <Input
+                className="w-56"
+                type="number"
+                min={8}
+                placeholder="最长边上限（留空=与源图一致）"
+                value={capText}
+                onChange={(e) => setCapText(e.target.value)}
+              />
+              <Input className="w-40" disabled placeholder="宽高自动（跟随源图）" value="" readOnly />
+            </div>
+          )}
         </div>
       )}
       <div className="grid grid-cols-2 gap-4">
@@ -470,7 +491,7 @@ function ImagesEntry({
           .filter(
             (p) =>
               !(
-                lockRatio &&
+                sizeMode !== 'default' &&
                 dimPair &&
                 (p.key === dimPair.width.key || p.key === dimPair.height.key)
               ),
@@ -509,6 +530,15 @@ function ImagesEntry({
       {dimsWarning && <p className="text-sm text-muted-foreground">⚠ {dimsWarning}</p>}
     </div>
   )
+}
+
+/** 输出尺寸模式:模板默认 / 锁定比例(填一边) / 跟随源图(可选最长边上限) */
+type SizeMode = 'default' | 'ratio' | 'source'
+
+/** 最长边上限解析:空/非法/非正视为未填 */
+function parseCap(text: string): number | undefined {
+  const n = Number(text)
+  return text.trim() !== '' && !Number.isNaN(n) && n > 0 ? n : undefined
 }
 
 /** 第一对 inputName 为 width/height 的 number 参数;凑不齐返回 null */
