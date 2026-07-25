@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import Papa from 'papaparse'
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { computeLockedDim, expandMatrix, fitSource, type ParamValues } from '@cwe/shared'
 import { Button } from '@/components/ui/button'
@@ -26,6 +26,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { ImageValueControl } from '@/components/image-value-control'
 import { api } from '@/lib/api'
 import { useImageDims } from '@/hooks/use-image-dims'
+import { useDebouncedValue } from '@/hooks/use-debounced-value'
 import { useInputOptions } from '@/hooks/use-input-options'
 import { useUploadFiles } from '@/hooks/use-upload-files'
 import { useComfyInputFiles } from '@/hooks/use-comfy-input-files'
@@ -147,7 +148,8 @@ function TableEntry({
   const [error, setError] = useState('')
   const dimPair = findDimPair(template.params)
   const imageParam = template.params.find((p) => p.type === 'image')
-  const [lockRatio, setLockRatio] = useState(false)
+  const [sizeMode, setSizeMode] = useState<SizeMode>('default')
+  const [capText, setCapText] = useState('')
 
   function update(next: ParamValues[]) {
     setRows(next)
@@ -175,14 +177,29 @@ function TableEntry({
   return (
     <div className="space-y-2">
       {dimPair && imageParam && (
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={lockRatio}
-            onChange={(e) => setLockRatio(e.target.checked)}
-          />
-          锁定源图比例（填 {dimPair.width.key} 或 {dimPair.height.key} 自动按该行图片比例算另一个）
-        </label>
+        <div className="flex items-center gap-2 text-sm">
+          <Label>输出尺寸</Label>
+          <Select value={sizeMode} onValueChange={(v) => setSizeMode(v as SizeMode)}>
+            <SelectTrigger className="h-8 w-64">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="default">模板默认</SelectItem>
+              <SelectItem value="ratio">锁定比例（填一边自动算另一边）</SelectItem>
+              <SelectItem value="source">跟随源图（选图自动填宽高）</SelectItem>
+            </SelectContent>
+          </Select>
+          {sizeMode === 'source' && (
+            <Input
+              className="h-8 w-56"
+              type="number"
+              min={8}
+              placeholder="最长边上限（留空=与源图一致）"
+              value={capText}
+              onChange={(e) => setCapText(e.target.value)}
+            />
+          )}
+        </div>
       )}
       <Table>
         <TableHeader>
@@ -207,13 +224,25 @@ function TableEntry({
                         update(next)
                       }}
                     />
-                  ) : lockRatio && dimPair && imageParam && (p.key === dimPair.width.key || p.key === dimPair.height.key) ? (
+                  ) : sizeMode === 'ratio' && dimPair && imageParam && (p.key === dimPair.width.key || p.key === dimPair.height.key) ? (
                     <DimCell
                       p={p}
                       otherKey={p.key === dimPair.width.key ? dimPair.height.key : dimPair.width.key}
                       driver={p.key === dimPair.width.key ? 'width' : 'height'}
                       imageName={String(row[imageParam.key] ?? imageParam.default ?? '')}
-                      locked={lockRatio}
+                      locked={sizeMode === 'ratio'}
+                      value={String(row[p.key] ?? '')}
+                      onPatch={(patch) => {
+                        const next = rows.map((r, j) => (j === i ? { ...r, ...patch } : r))
+                        update(next)
+                      }}
+                    />
+                  ) : sizeMode === 'source' && dimPair && imageParam && p.key === dimPair.width.key ? (
+                    <SourceDimCell
+                      p={p}
+                      heightKey={dimPair.height.key}
+                      imageName={String(row[imageParam.key] ?? imageParam.default ?? '')}
+                      cap={parseCap(capText)}
                       value={String(row[p.key] ?? '')}
                       onPatch={(patch) => {
                         const next = rows.map((r, j) => (j === i ? { ...r, ...patch } : r))
@@ -798,6 +827,46 @@ function DimCell({
             onPatch({ [p.key]: raw })
           }
         }}
+      />
+      {failed && <p className="text-xs text-muted-foreground">{dimsErrorText(dims.error)}</p>}
+    </div>
+  )
+}
+
+/** 跟随源图模式的宽格:该行图片(或上限)变化后探测尺寸,把宽高两格一起写入;仍可手改 */
+function SourceDimCell({
+  p,
+  heightKey,
+  imageName,
+  cap,
+  value,
+  onPatch,
+}: {
+  p: ParamDef
+  heightKey: string
+  imageName: string
+  cap: number | undefined
+  value: string
+  onPatch: (patch: Record<string, string | number>) => void
+}) {
+  const debouncedName = useDebouncedValue(imageName)
+  const dims = useImageDims(debouncedName || undefined)
+  const patchRef = useRef(onPatch)
+  patchRef.current = onPatch
+  useEffect(() => {
+    if (dims.data) {
+      const d = fitSource(dims.data, cap)
+      patchRef.current({ [p.key]: d.width, [heightKey]: d.height })
+    }
+  }, [dims.data, cap, p.key, heightKey])
+  const failed = !!imageName && dims.isError
+  return (
+    <div className="space-y-1">
+      <Input
+        className="h-8"
+        placeholder={String(p.default ?? '')}
+        value={value}
+        onChange={(e) => onPatch({ [p.key]: e.target.value })}
       />
       {failed && <p className="text-xs text-muted-foreground">{dimsErrorText(dims.error)}</p>}
     </div>
