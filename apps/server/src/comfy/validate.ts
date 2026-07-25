@@ -14,17 +14,29 @@ export interface EnumInputRef {
   inputName: string
 }
 
+function inputSpec(info: ObjectInfoMap, classType: string, inputName: string): unknown[] | undefined {
+  const def = info[classType]
+  for (const section of [def?.input?.required, def?.input?.optional]) {
+    const spec = section?.[inputName]
+    if (spec) return spec
+  }
+  return undefined
+}
+
+/** image_upload 型 COMBO(如 LoadImage.image)不是用户可选枚举,值在建批次时才上传 */
+function isUploadInput(spec: unknown[]): boolean {
+  const opts = (spec[1] ?? {}) as Record<string, unknown>
+  return Boolean(opts.image_upload)
+}
+
 /** classType.inputName 的枚举可选值;非枚举输入返回 null */
 export function enumOptions(
   info: ObjectInfoMap,
   classType: string,
   inputName: string,
 ): string[] | null {
-  const def = info[classType]
-  for (const section of [def?.input?.required, def?.input?.optional]) {
-    const spec = section?.[inputName]
-    if (spec && Array.isArray(spec[0])) return (spec[0] as unknown[]).map(String)
-  }
+  const spec = inputSpec(info, classType, inputName)
+  if (spec && Array.isArray(spec[0]) && !isUploadInput(spec)) return (spec[0] as unknown[]).map(String)
   return null
 }
 
