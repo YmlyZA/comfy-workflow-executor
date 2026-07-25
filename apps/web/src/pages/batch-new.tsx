@@ -387,6 +387,8 @@ function ImagesEntry({
         const jobs = stored.map((s, i) => {
           const r = results[i]!
           const base: ParamValues = { ...shared, [imageKey]: s.stored }
+          delete base[dimPair.width.key]
+          delete base[dimPair.height.key]
           if (r.status === 'fulfilled') {
             const d = computeLockedDim(r.value, driver, n)
             return { ...base, [dimPair.width.key]: d.width, [dimPair.height.key]: d.height }
