@@ -547,7 +547,7 @@ function ImageAxisPick({
   }
 
   const groups: Array<[string, string[]]> = [['服务端已上传', uploads.data?.files ?? []]]
-  if (!gpuFiles.isError) groups.push(['GPU 主机已有', gpuFiles.data?.files ?? []])
+  if (!gpuFiles.isError && !gpuFiles.isLoading) groups.push(['GPU 主机已有', gpuFiles.data?.files ?? []])
 
   return (
     <div className="space-y-2">

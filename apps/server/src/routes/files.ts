@@ -34,7 +34,9 @@ export function uploadRoutes(deps: AppDeps) {
     if (files.length === 0) return c.json({ error: 'no files' }, 400)
     const stored: Array<{ name: string; stored: string }> = []
     for (const file of files) {
-      const safe = basename(file.name).replace(/[^\w.-]/g, '_')
+      const safe = basename(file.name)
+        .replace(/[^\w.-]/g, '_')
+        .replace(/\.{2,}/g, '.')
       const name = `${randomBytes(4).toString('hex')}-${safe}`
       await writeFile(
         join(deps.config.dataDir, 'uploads', name),

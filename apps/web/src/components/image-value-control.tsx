@@ -77,7 +77,7 @@ export function ImageValueControl({
             {(uploads.data?.files ?? []).length === 0 && (
               <DropdownMenuItem disabled>（无）</DropdownMenuItem>
             )}
-            {!gpuFiles.isError && (
+            {!gpuFiles.isError && !gpuFiles.isLoading && (
               <>
                 <DropdownMenuSeparator />
                 <DropdownMenuLabel>GPU 主机已有</DropdownMenuLabel>
