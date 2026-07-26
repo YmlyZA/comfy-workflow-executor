@@ -33,3 +33,11 @@ export function outputUrl(path: string): string {
 export function downloadUrl(batchId: number): string {
   return `/api/batches/${batchId}/download?token=${encodeURIComponent(getToken())}`
 }
+
+export function uploadFileUrl(name: string): string {
+  return `/api/uploads/${encodeURIComponent(name)}?token=${encodeURIComponent(getToken())}`
+}
+
+export function comfyInputFileUrl(name: string): string {
+  return `/api/comfy/input-image?name=${encodeURIComponent(name)}&token=${encodeURIComponent(getToken())}`
+}
