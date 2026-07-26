@@ -301,3 +301,23 @@ describe('GET /api/comfy/input-image', () => {
     expect((await app.request('/api/comfy/input-image?name=x.png', { headers: H })).status).toBe(503)
   })
 })
+
+describe('GET /api/comfy/cwe-status', () => {
+  it('扩展在线返回 installed:true', async () => {
+    const res = await app.request('/api/comfy/cwe-status', { headers: H })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ installed: true })
+  })
+
+  it('cwePing false 返回 installed:false', async () => {
+    comfy.cwePingResult = false
+    const res = await app.request('/api/comfy/cwe-status', { headers: H })
+    expect(await res.json()).toEqual({ installed: false })
+  })
+
+  it('comfy 未配置返回 installed:false 而非 503', async () => {
+    const res = await makeApp(false).request('/api/comfy/cwe-status', { headers: H })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ installed: false })
+  })
+})

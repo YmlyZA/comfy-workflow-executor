@@ -40,6 +40,12 @@ export interface ComfyClient {
   getObjectInfo(): Promise<ObjectInfoMap>
   /** 拉取 ComfyUI input 目录图片字节;404 返回 null。name 支持 sub/name.png 子目录写法 */
   getInputImage(name: string): Promise<ArrayBuffer | null>
+  /** cwe 扩展是否安装(GET /cwe/ping);离线/404/异常均 false */
+  cwePing(): Promise<boolean>
+  /** 删除 GPU 侧 output 文件;扩展缺失/离线抛错,由调用方兜 gpuPurgeFailed */
+  cweDeleteOutputFiles(
+    refs: Array<{ filename: string; subfolder: string }>,
+  ): Promise<{ deleted: number; missing: number; failed: string[] }>
   /** 返回断开函数。连接失败时静默重试由调用方负责。 */
   connectEvents(clientId: string, onEvent: (e: ComfyWsEvent) => void): () => void
 }
@@ -160,6 +166,27 @@ export function createComfyClient(baseUrl: string): ComfyClient {
         await rm(destPath, { force: true })
         throw err
       }
+    },
+
+    async cwePing() {
+      try {
+        const res = await fetch(`${http}/cwe/ping`, { signal: AbortSignal.timeout(3000) })
+        if (!res.ok) return false
+        const body = (await res.json()) as { ok?: boolean }
+        return body.ok === true
+      } catch {
+        return false
+      }
+    },
+
+    async cweDeleteOutputFiles(refs) {
+      const res = await fetch(`${http}/cwe/delete-output-files`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files: refs }),
+      })
+      if (!res.ok) throw new Error(`cwe delete failed: ${res.status} ${await res.text()}`)
+      return (await res.json()) as { deleted: number; missing: number; failed: string[] }
     },
 
     connectEvents(clientId, onEvent) {
