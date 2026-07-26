@@ -33,6 +33,7 @@ import {
 } from '@/components/ui/select'
 import { DataTable, SortableHeader, selectColumn } from '@/components/data-table/data-table'
 import { useEvents } from '@/hooks/use-events'
+import { useCweStatus } from '@/hooks/use-cwe-status'
 import { api } from '@/lib/api'
 import { batchBulkActions, runBulk, summarizeBulk } from '@/lib/bulk'
 
@@ -206,6 +207,9 @@ function BatchesBulkActions({
 }) {
   const qc = useQueryClient()
   const [purge, setPurge] = useState(false)
+  const [purgeGpu, setPurgeGpu] = useState(false)
+  const cwe = useCweStatus()
+  const cweInstalled = cwe.data?.installed === true
   const selected = table.getFilteredSelectedRowModel().rows.map((r) => r.original)
   const actions = batchBulkActions(selected)
 
@@ -262,7 +266,7 @@ function BatchesBulkActions({
       >
         重试失败
       </Button>
-      <AlertDialog onOpenChange={(open) => { if (!open) setPurge(false) }}>
+      <AlertDialog onOpenChange={(open) => { if (!open) { setPurge(false); setPurgeGpu(false) } }}>
         <AlertDialogTrigger asChild>
           <Button size="sm" variant="destructive" disabled={!actions.del}>
             删除所选（{selected.length}）
@@ -279,25 +283,52 @@ function BatchesBulkActions({
             <Checkbox id="purge" checked={purge} onCheckedChange={(v) => setPurge(!!v)} />
             <Label htmlFor="purge">同时删除输出文件（结果画廊将被清空，不可恢复）</Label>
           </div>
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="purge-gpu"
+              checked={purgeGpu}
+              disabled={!cweInstalled}
+              onCheckedChange={(v) => setPurgeGpu(!!v)}
+            />
+            <Label htmlFor="purge-gpu" className={cweInstalled ? '' : 'text-muted-foreground'}>
+              同时删除 GPU 主机上的输出文件
+              {cweInstalled ? '' : '（需在 GPU 主机安装 cwe 扩展）'}
+            </Label>
+          </div>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 const purgeFailures: string[] = []
+                const gpuFailures: string[] = []
+                const gpuSkips: string[] = []
                 void run(
                   '删除',
                   () => true,
                   async (b) => {
-                    const res = await api<{ ok: true; purgeFailed?: boolean }>(
-                      `/batches/${b.id}${purge ? '?purgeOutputs=1' : ''}`,
-                      { method: 'DELETE' },
-                    )
+                    const qs = new URLSearchParams()
+                    if (purge) qs.set('purgeOutputs', '1')
+                    if (purgeGpu) qs.set('purgeGpu', '1')
+                    const q = qs.toString()
+                    const res = await api<{
+                      ok: true
+                      purgeFailed?: boolean
+                      gpuPurgeFailed?: boolean
+                      gpuSkipped?: number
+                    }>(`/batches/${b.id}${q ? `?${q}` : ''}`, { method: 'DELETE' })
                     if (res.purgeFailed) purgeFailures.push(b.name)
+                    if (res.gpuPurgeFailed) gpuFailures.push(b.name)
+                    if (res.gpuSkipped) gpuSkips.push(b.name)
                   },
-                  () =>
-                    purgeFailures.length > 0
-                      ? `；${purgeFailures.join('、')} 记录已删，但输出目录清理失败`
-                      : '',
+                  () => {
+                    const parts: string[] = []
+                    if (purgeFailures.length > 0)
+                      parts.push(`${purgeFailures.join('、')} 记录已删，但输出目录清理失败`)
+                    if (gpuFailures.length > 0) parts.push(`${gpuFailures.join('、')} GPU 侧清理失败`)
+                    if (gpuSkips.length > 0)
+                      parts.push(`${gpuSkips.join('、')} GPU 侧引用缺失已跳过（旧批次）`)
+                    return parts.length > 0 ? `；${parts.join('；')}` : ''
+                  },
                 )
               }}
             >
