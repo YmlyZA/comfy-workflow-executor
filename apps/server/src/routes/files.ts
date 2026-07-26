@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { createReadStream, existsSync, readdirSync, statSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { basename, join, normalize, resolve } from 'node:path'
@@ -32,16 +32,28 @@ export function uploadRoutes(deps: AppDeps) {
     const raw = body['files']
     const files = (Array.isArray(raw) ? raw : [raw]).filter((f): f is File => f instanceof File)
     if (files.length === 0) return c.json({ error: 'no files' }, 400)
+    const dir = join(deps.config.dataDir, 'uploads')
     const stored: Array<{ name: string; stored: string }> = []
     for (const file of files) {
+      const buf = Buffer.from(await file.arrayBuffer())
+      const hash = createHash('sha256').update(buf).digest('hex').slice(0, 16)
+      // 同内容(hash 前缀相同)复用已有文件,不重复写盘;返回名以先到者为准
+      let entries: string[] = []
+      try {
+        entries = readdirSync(dir)
+      } catch {
+        // 目录不存在时走写盘路径,由 writeFile 抛错(与旧行为一致)
+      }
+      const existing = entries.find((n) => n.startsWith(`${hash}-`))
+      if (existing) {
+        stored.push({ name: file.name, stored: existing })
+        continue
+      }
       const safe = basename(file.name)
         .replace(/[^\w.-]/g, '_')
         .replace(/\.{2,}/g, '.')
-      const name = `${randomBytes(4).toString('hex')}-${safe}`
-      await writeFile(
-        join(deps.config.dataDir, 'uploads', name),
-        Buffer.from(await file.arrayBuffer()),
-      )
+      const name = `${hash}-${safe}`
+      await writeFile(join(dir, name), buf)
       stored.push({ name: file.name, stored: name })
     }
     return c.json(stored, 201)
