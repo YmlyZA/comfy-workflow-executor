@@ -7,6 +7,7 @@ import archiver from 'archiver'
 import { Hono } from 'hono'
 import type { AppDeps } from '../app.js'
 import { getBatchDetail } from '../db/repo.js'
+import { imageMime } from '../mime.js'
 
 export function uploadRoutes(deps: AppDeps) {
   const app = new Hono()
@@ -25,6 +26,17 @@ export function uploadRoutes(deps: AppDeps) {
       .sort((a, b) => (b.stat?.mtimeMs ?? 0) - (a.stat?.mtimeMs ?? 0))
       .map((e) => e.name)
     return c.json({ files })
+  })
+
+  /** 上传文件内容(缩略图用);仅裸文件名,防穿越 */
+  app.get('/:name', (c) => {
+    const name = c.req.param('name')
+    if (name.includes('..') || basename(name) !== name) return c.json({ error: 'invalid name' }, 400)
+    const full = join(deps.config.dataDir, 'uploads', name)
+    const stat = statSync(full, { throwIfNoEntry: false })
+    if (!stat?.isFile()) return c.json({ error: 'not found' }, 404)
+    c.header('Content-Type', imageMime(name))
+    return c.body(Readable.toWeb(createReadStream(full)) as ReadableStream)
   })
 
   app.post('/', async (c) => {

@@ -271,3 +271,33 @@ describe('GET /api/comfy/image-dims', () => {
     expect(await res.json()).toEqual({ width: 1, height: 1 })
   })
 })
+
+describe('GET /api/comfy/input-image', () => {
+  it('缺 name 返回 400', async () => {
+    expect((await app.request('/api/comfy/input-image', { headers: H })).status).toBe(400)
+  })
+
+  it('代理返回 GPU 侧图片内容与 Content-Type', async () => {
+    comfy.inputImages['gpu.png'] = PNG_1X1
+    const res = await app.request('/api/comfy/input-image?name=gpu.png', { headers: H })
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toBe('image/png')
+    expect(Buffer.from(await res.arrayBuffer())).toEqual(PNG_1X1)
+  })
+
+  it('不存在返回 404', async () => {
+    expect((await app.request('/api/comfy/input-image?name=nope.png', { headers: H })).status).toBe(404)
+  })
+
+  it('comfy 未配置返回 503', async () => {
+    const res = await makeApp(false).request('/api/comfy/input-image?name=x.png', { headers: H })
+    expect(res.status).toBe(503)
+  })
+
+  it('getInputImage 抛错(离线)返回 503', async () => {
+    comfy.getInputImage = async () => {
+      throw new Error('ECONNREFUSED')
+    }
+    expect((await app.request('/api/comfy/input-image?name=x.png', { headers: H })).status).toBe(503)
+  })
+})

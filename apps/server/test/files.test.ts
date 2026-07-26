@@ -136,6 +136,33 @@ describe('zip download', () => {
   })
 })
 
+describe('GET /api/uploads/:name', () => {
+  it('返回文件内容与图片 Content-Type', async () => {
+    writeFileSync(join(dataDir, 'uploads', 'abc-pic.png'), 'img-bytes')
+    const res = await app.request('/api/uploads/abc-pic.png', { headers: H })
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toBe('image/png')
+    expect(await res.text()).toBe('img-bytes')
+  })
+
+  it('未知扩展名回退 octet-stream', async () => {
+    writeFileSync(join(dataDir, 'uploads', 'abc-blob.xyz'), 'x')
+    const res = await app.request('/api/uploads/abc-blob.xyz', { headers: H })
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toBe('application/octet-stream')
+  })
+
+  it('路径穿越返回 400', async () => {
+    const res = await app.request(`/api/uploads/${encodeURIComponent('../secret.png')}`, { headers: H })
+    expect(res.status).toBe(400)
+  })
+
+  it('不存在返回 404', async () => {
+    const res = await app.request('/api/uploads/nope.png', { headers: H })
+    expect(res.status).toBe(404)
+  })
+})
+
 describe('sse events', () => {
   it('forwards emitted events and removes listener on abort', async () => {
     const res = await app.request('/api/events', { headers: H })

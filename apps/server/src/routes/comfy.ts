@@ -8,6 +8,7 @@ import { ObjectInfoCache } from '../comfy/object-info-cache.js'
 import type { ObjectInfoMap } from '../comfy/client.js'
 import { enumOptions, validateApiJson } from '../comfy/validate.js'
 import { imageSize } from 'image-size'
+import { imageMime } from '../mime.js'
 
 export function comfyRoutes(deps: AppDeps) {
   const app = new Hono()
@@ -95,6 +96,22 @@ export function comfyRoutes(deps: AppDeps) {
     } catch {
       return c.json({ error: '无法解析图片尺寸' }, 404)
     }
+  })
+
+  /** GPU 侧 input 图片内容代理(缩略图用);错误语义与 image-dims 对齐 */
+  app.get('/input-image', async (c) => {
+    const name = c.req.query('name') ?? ''
+    if (!name) return c.json({ error: '缺少 name 参数' }, 400)
+    if (!deps.comfy) return c.json({ error: 'ComfyUI 离线,无法读取 GPU 侧图片' }, 503)
+    let buf: ArrayBuffer | null
+    try {
+      buf = await deps.comfy.getInputImage(name)
+    } catch {
+      return c.json({ error: 'ComfyUI 离线,无法读取 GPU 侧图片' }, 503)
+    }
+    if (!buf) return c.json({ error: '图片不存在' }, 404)
+    c.header('Content-Type', imageMime(name))
+    return c.body(buf)
   })
 
   return app
