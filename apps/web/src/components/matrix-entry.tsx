@@ -58,7 +58,7 @@ export function MatrixEntry({
       if (!raw) continue
       out[p.key] =
         p.type === 'number' || p.type === 'seed'
-          ? raw.map(Number).filter((n) => !Number.isNaN(n))
+          ? raw.filter((s) => s.trim() !== '').map(Number).filter((n) => !Number.isNaN(n))
           : raw.map((v) => v.trim()).filter(Boolean)
     }
     return out
