@@ -29,6 +29,8 @@ export class Executor {
   private running = false
   private currentJobId: number | null = null
   private disconnectWs: (() => void) | null = null
+  /** 本地 stored 名 → GPU 侧返回名;进程内去重,重启后靠 overwrite 幂等重传 */
+  private readonly gpuUploads = new Map<string, string>()
 
   constructor(deps: ExecutorDeps) {
     this.db = deps.db
@@ -110,7 +112,12 @@ export class Executor {
         const local = join(this.dataDir, 'uploads', v)
         // 本地 uploads 有则上传替换;没有(或含 ../绝对路径)原样传,引用 GPU 侧 input 已有文件
         if (!v.includes('..') && !isAbsolute(v) && existsSync(local)) {
-          values[def.key] = await this.comfy.uploadImage(local)
+          let gpuName = this.gpuUploads.get(v)
+          if (!gpuName) {
+            gpuName = await this.comfy.uploadImage(local)
+            this.gpuUploads.set(v, gpuName)
+          }
+          values[def.key] = gpuName
         }
       }
     }

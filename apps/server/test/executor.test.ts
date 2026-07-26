@@ -219,4 +219,27 @@ describe('executor', () => {
     expect(comfy.uploads).toHaveLength(0)
     expect(comfy.submitted[0]?.['10'].inputs.image).toBe('../secret.png')
   })
+
+  it('同一本地文件多个 job 只上传一次(进程内缓存)', async () => {
+    const p = [
+      ...params,
+      { key: 'img', label: 'I', nodeId: '10', inputName: 'image', type: 'image' as const },
+    ]
+    const { mkdirSync } = await import('node:fs')
+    mkdirSync(join(dataDir, 'uploads'), { recursive: true })
+    await writeFile(join(dataDir, 'uploads', 'input.png'), 'x')
+    seed(
+      [
+        { prompt: 'a', img: 'input.png' },
+        { prompt: 'b', img: 'input.png' },
+      ],
+      p,
+    )
+    const ex = makeExecutor()
+    await ex.runPendingOnce()
+    await ex.runPendingOnce()
+    expect(comfy.uploads).toHaveLength(1)
+    expect(comfy.submitted[0]?.['10'].inputs.image).toBe('uploaded-input.png')
+    expect(comfy.submitted[1]?.['10'].inputs.image).toBe('uploaded-input.png')
+  })
 })
