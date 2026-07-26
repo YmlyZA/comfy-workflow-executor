@@ -242,4 +242,11 @@ describe('executor', () => {
     expect(comfy.submitted[0]?.['10'].inputs.image).toBe('uploaded-input.png')
     expect(comfy.submitted[1]?.['10'].inputs.image).toBe('uploaded-input.png')
   })
+
+  it('outputs 带 GPU 侧引用(供删除 batch 时清理)', async () => {
+    const b = seed()
+    await makeExecutor().runPendingOnce()
+    const out = repo.getBatchDetail(db, b.id)!.jobs[0]!.outputs![0]!
+    expect(out.gpu).toEqual({ filename: 'out.png', subfolder: '' })
+  })
 })

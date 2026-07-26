@@ -181,7 +181,11 @@ export class Executor {
     for (const [i, ref] of refs.entries()) {
       const filename = `${job.sortOrder}-${i}-${ref.filename}`
       await this.comfy.downloadOutput(ref, join(dir, filename))
-      outputs.push({ path: `${job.batchId}/${filename}`, filename })
+      outputs.push({
+        path: `${job.batchId}/${filename}`,
+        filename,
+        gpu: { filename: ref.filename, subfolder: ref.subfolder },
+      })
     }
     return outputs
   }
