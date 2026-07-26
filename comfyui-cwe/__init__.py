@@ -31,8 +31,13 @@ async def cwe_ping(request):
 async def cwe_delete_output_files(request):
     body = await request.json()
     files = body.get("files") or []
+    if not isinstance(files, list):
+        files = []
     deleted, missing, failed = 0, 0, []
     for item in files:
+        if not isinstance(item, dict):
+            failed.append(str(item))
+            continue
         subfolder = str(item.get("subfolder") or "")
         filename = str(item.get("filename") or "")
         label = f"{subfolder}/{filename}" if subfolder else filename
