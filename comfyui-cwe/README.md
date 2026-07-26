@@ -13,6 +13,7 @@ comfy-workflow-executor 配套的 ComfyUI 扩展：提供受限的 output 文件
 ## 安装
 
 1. 拷贝本目录到 GPU 主机：`cp -r comfyui-cwe <ComfyUI>/custom_nodes/`
+   或软链接：`ln -s <repo>/comfyui-cwe <ComfyUI>/custom_nodes/comfyui-cwe`
 2. 重启 ComfyUI
 3. 验证：`curl http://localhost:8188/cwe/ping`
 

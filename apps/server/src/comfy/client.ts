@@ -184,6 +184,7 @@ export function createComfyClient(baseUrl: string): ComfyClient {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ files: refs }),
+        signal: AbortSignal.timeout(15_000),
       })
       if (!res.ok) throw new Error(`cwe delete failed: ${res.status} ${await res.text()}`)
       return (await res.json()) as { deleted: number; missing: number; failed: string[] }

@@ -45,8 +45,11 @@ async def cwe_delete_output_files(request):
         if target is None:
             failed.append(label)
             continue
-        if not os.path.isfile(target):
+        if not os.path.exists(target):
             missing += 1
+            continue
+        if not os.path.isfile(target):
+            failed.append(label)
             continue
         try:
             os.remove(target)
