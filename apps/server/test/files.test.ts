@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -36,7 +36,7 @@ describe('uploads', () => {
     expect(res.status).toBe(201)
     const body = (await res.json()) as Array<{ name: string; stored: string }>
     expect(body[0]?.name).toBe('cat.png')
-    expect(body[0]?.stored).toMatch(/^[a-f0-9]{8}-cat\.png$/)
+    expect(body[0]?.stored).toMatch(/^[a-f0-9]{16}-cat\.png$/)
   })
 
   it('stores multiple multipart files with distinct stored names', async () => {
@@ -60,7 +60,36 @@ describe('uploads', () => {
     const body = (await res.json()) as Array<{ name: string; stored: string }>
     expect(body[0]?.name).toBe('photo..final.png')
     expect(body[0]?.stored).not.toContain('..')
-    expect(body[0]?.stored).toMatch(/^[a-f0-9]{8}-photo\.final\.png$/)
+    expect(body[0]?.stored).toMatch(/^[a-f0-9]{16}-photo\.final\.png$/)
+  })
+
+  async function uploadOne(content: string, fname: string): Promise<string> {
+    const form = new FormData()
+    form.append('files', new Blob([content]), fname)
+    const res = await app.request('/api/uploads', { method: 'POST', headers: H, body: form })
+    expect(res.status).toBe(201)
+    return ((await res.json()) as Array<{ stored: string }>)[0]!.stored
+  }
+
+  it('同内容重复上传返回同名且不新增文件', async () => {
+    const first = await uploadOne('same-bytes', 'a.png')
+    const second = await uploadOne('same-bytes', 'a.png')
+    expect(second).toBe(first)
+    expect(readdirSync(join(dataDir, 'uploads'))).toEqual([first])
+  })
+
+  it('同内容不同原名复用先到者', async () => {
+    const first = await uploadOne('same-bytes', 'a.png')
+    const second = await uploadOne('same-bytes', 'b.png')
+    expect(second).toBe(first)
+    expect(readdirSync(join(dataDir, 'uploads'))).toEqual([first])
+  })
+
+  it('不同内容得到不同存储名', async () => {
+    const first = await uploadOne('bytes-1', 'a.png')
+    const second = await uploadOne('bytes-2', 'a.png')
+    expect(second).not.toBe(first)
+    expect(readdirSync(join(dataDir, 'uploads')).sort()).toEqual([first, second].sort())
   })
 })
 
@@ -104,6 +133,33 @@ describe('zip download', () => {
     const buf = new Uint8Array(await res.arrayBuffer())
     expect(buf.length).toBeGreaterThan(0)
     expect([buf[0], buf[1]]).toEqual([0x50, 0x4b]) // "PK"
+  })
+})
+
+describe('GET /api/uploads/:name', () => {
+  it('返回文件内容与图片 Content-Type', async () => {
+    writeFileSync(join(dataDir, 'uploads', 'abc-pic.png'), 'img-bytes')
+    const res = await app.request('/api/uploads/abc-pic.png', { headers: H })
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toBe('image/png')
+    expect(await res.text()).toBe('img-bytes')
+  })
+
+  it('未知扩展名回退 octet-stream', async () => {
+    writeFileSync(join(dataDir, 'uploads', 'abc-blob.xyz'), 'x')
+    const res = await app.request('/api/uploads/abc-blob.xyz', { headers: H })
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toBe('application/octet-stream')
+  })
+
+  it('路径穿越返回 400', async () => {
+    const res = await app.request(`/api/uploads/${encodeURIComponent('../secret.png')}`, { headers: H })
+    expect(res.status).toBe(400)
+  })
+
+  it('不存在返回 404', async () => {
+    const res = await app.request('/api/uploads/nope.png', { headers: H })
+    expect(res.status).toBe(404)
   })
 })
 

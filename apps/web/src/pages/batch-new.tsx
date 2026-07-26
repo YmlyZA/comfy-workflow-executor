@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueries, useQuery } from '@tanstack/react-query'
 import Papa from 'papaparse'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
@@ -23,13 +23,12 @@ import {
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
+import { ImageMultiPick } from '@/components/image-multi-pick'
 import { ImageValueControl } from '@/components/image-value-control'
 import { api } from '@/lib/api'
 import { useImageDims } from '@/hooks/use-image-dims'
 import { useDebouncedValue } from '@/hooks/use-debounced-value'
 import { useInputOptions } from '@/hooks/use-input-options'
-import { useUploadFiles } from '@/hooks/use-upload-files'
-import { useComfyInputFiles } from '@/hooks/use-comfy-input-files'
 import type { TemplateDto } from '@/pages/templates'
 import type { ParamDef } from '@cwe/shared'
 
@@ -382,66 +381,75 @@ function ImagesEntry({
   const otherParams = template.params.filter((p) => p.type !== 'image')
   const [imageKey, setImageKey] = useState(imageParams[0]?.key ?? '')
   const [shared, setShared] = useState<ParamValues>({})
-  const [uploading, setUploading] = useState(false)
-  const [error, setError] = useState('')
+  const [selected, setSelected] = useState<string[]>([])
+  const [dimsWarning, setDimsWarning] = useState('')
 
-  const dimPair = findDimPair(template.params)
+  // findDimPair 每渲染返回新对象,memo 化避免派生 effect 每渲染重跑
+  const dimPair = useMemo(() => findDimPair(template.params), [template.params])
   const [sizeMode, setSizeMode] = useState<SizeMode>('default')
   const [driver, setDriver] = useState<'width' | 'height'>('width')
   const [driverValue, setDriverValue] = useState('')
   const [capText, setCapText] = useState('')
-  const [dimsWarning, setDimsWarning] = useState('')
 
-  async function onFiles(files: FileList) {
-    setUploading(true)
-    setError('')
-    setDimsWarning('')
-    try {
-      const n = Number(driverValue)
-      if (sizeMode === 'ratio' && dimPair && (!driverValue || Number.isNaN(n) || n <= 0)) {
-        setError('锁定比例后需先填写有效的宽或高数值')
-        return
-      }
-      const form = new FormData()
-      for (const f of files) form.append('files', f)
-      const stored = await api<Array<{ name: string; stored: string }>>('/uploads', {
-        method: 'POST',
-        body: form,
-      })
-      if (sizeMode !== 'default' && dimPair) {
-        const results = await Promise.allSettled(
-          stored.map((s) =>
-            api<{ width: number; height: number }>(
-              `/comfy/image-dims?name=${encodeURIComponent(s.stored)}`,
-            ),
-          ),
-        )
-        const cap = parseCap(capText)
-        let failed = 0
-        const jobs = stored.map((s, i) => {
-          const r = results[i]!
-          const base: ParamValues = { ...shared, [imageKey]: s.stored }
-          delete base[dimPair.width.key]
-          delete base[dimPair.height.key]
-          if (r.status === 'fulfilled') {
-            const d =
-              sizeMode === 'ratio' ? computeLockedDim(r.value, driver, n) : fitSource(r.value, cap)
-            return { ...base, [dimPair.width.key]: d.width, [dimPair.height.key]: d.height }
-          }
-          failed++
-          return base // 宽高留空 → 提交时用模板默认值
-        })
-        if (failed > 0) setDimsWarning(`${failed} 张图未能获取尺寸，已用模板默认宽高`)
-        onChange(jobs)
-      } else {
-        onChange(stored.map((s) => ({ ...shared, [imageKey]: s.stored })))
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setUploading(false)
+  const n = Number(driverValue)
+  const ratioInvalid = sizeMode === 'ratio' && (!driverValue || Number.isNaN(n) || n <= 0)
+  const needDims = sizeMode !== 'default' && !!dimPair && !ratioInvalid
+
+  const dimQueries = useQueries({
+    queries: selected.map((name) => ({
+      queryKey: ['image-dims', name],
+      enabled: needDims,
+      queryFn: () =>
+        api<{ width: number; height: number }>(
+          `/comfy/image-dims?name=${encodeURIComponent(name)}`,
+        ),
+      staleTime: 5 * 60_000,
+      retry: false,
+    })),
+  })
+  const settled = dimQueries.every((q) => q.isSuccess || q.isError)
+  // useQueries 每渲染返回新数组,不能直接进 effect 依赖;结果压成字符串键,内容不变不重算
+  const dimsKey = JSON.stringify(
+    dimQueries.map((q) =>
+      q.isSuccess ? [q.data.width, q.data.height] : q.isError ? 'err' : 'pending',
+    ),
+  )
+  const probing = needDims && selected.length > 0 && !settled
+
+  useEffect(() => {
+    if (selected.length === 0 || !imageKey) {
+      onChange([])
+      return
     }
-  }
+    if (sizeMode === 'default' || !dimPair) {
+      setDimsWarning('')
+      onChange(selected.map((s) => ({ ...shared, [imageKey]: s })))
+      return
+    }
+    if (ratioInvalid || !settled) {
+      onChange([])
+      return
+    }
+    let failed = 0
+    const jobs = selected.map((s, i) => {
+      const q = dimQueries[i]!
+      const base: ParamValues = { ...shared, [imageKey]: s }
+      delete base[dimPair.width.key]
+      delete base[dimPair.height.key]
+      if (q.isSuccess) {
+        const d =
+          sizeMode === 'ratio'
+            ? computeLockedDim(q.data, driver, n)
+            : fitSource(q.data, parseCap(capText))
+        return { ...base, [dimPair.width.key]: d.width, [dimPair.height.key]: d.height }
+      }
+      failed++
+      return base // 宽高留空 → 提交时用模板默认值
+    })
+    setDimsWarning(failed > 0 ? `${failed} 张图未能获取尺寸，已用模板默认宽高` : '')
+    onChange(jobs)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- dimQueries 的内容变化已由 dimsKey 表达
+  }, [selected, shared, imageKey, sizeMode, driver, driverValue, capText, dimsKey, settled, ratioInvalid, dimPair, onChange])
 
   if (imageParams.length === 0) {
     return <p className="text-sm text-muted-foreground">该模板没有 image 类型参数</p>
@@ -547,18 +555,14 @@ function ImagesEntry({
             </div>
           ))}
       </div>
-      <Input
-        type="file"
-        multiple
-        accept="image/*"
-        disabled={uploading}
-        onChange={(e) => {
-          if (e.target.files?.length) void onFiles(e.target.files)
-          e.target.value = ''
-        }}
-      />
-      {uploading && <p className="text-sm text-muted-foreground">上传中…</p>}
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      <div className="space-y-1">
+        <Label>图片（勾选已有或上传本机，选中即生成任务）</Label>
+        <ImageMultiPick value={selected} onChange={setSelected} />
+      </div>
+      {ratioInvalid && (
+        <p className="text-sm text-destructive">锁定比例后需先填写有效的宽或高数值</p>
+      )}
+      {probing && <p className="text-sm text-muted-foreground">探测尺寸中…</p>}
       {dimsWarning && <p className="text-sm text-muted-foreground">⚠ {dimsWarning}</p>}
     </div>
   )
@@ -691,7 +695,7 @@ function EnumAxisPick({
   )
 }
 
-/** image 参数矩阵轴:双来源勾选 + 本机多选上传追加 + 手填 */
+/** image 参数矩阵轴:复用 ImageMultiPick(换行文本 ↔ string[] 适配) + 手填 textarea */
 function ImageAxisPick({
   text,
   onChange,
@@ -699,88 +703,13 @@ function ImageAxisPick({
   text: string
   onChange: (v: string) => void
 }) {
-  const qc = useQueryClient()
-  const fileRef = useRef<HTMLInputElement>(null)
-  const [uploading, setUploading] = useState(false)
-  const [error, setError] = useState('')
-  const uploads = useUploadFiles()
-  const gpuFiles = useComfyInputFiles()
-
   const lines = text
     .split('\n')
     .map((l) => l.trim())
     .filter(Boolean)
-  const chosen = new Set(lines)
-
-  function toggle(name: string, checked: boolean) {
-    const next = new Set(chosen)
-    if (checked) next.add(name)
-    else next.delete(name)
-    onChange([...next].join('\n'))
-  }
-
-  async function onFiles(files: FileList) {
-    setUploading(true)
-    setError('')
-    try {
-      const form = new FormData()
-      for (const f of files) form.append('files', f)
-      const stored = await api<Array<{ name: string; stored: string }>>('/uploads', {
-        method: 'POST',
-        body: form,
-      })
-      onChange([...lines, ...stored.map((s) => s.stored)].join('\n'))
-      void qc.invalidateQueries({ queryKey: ['upload-files'] })
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '上传失败')
-    } finally {
-      setUploading(false)
-    }
-  }
-
-  const groups: Array<[string, string[]]> = [['服务端已上传', uploads.data?.files ?? []]]
-  if (!gpuFiles.isError && !gpuFiles.isLoading) groups.push(['GPU 主机已有', gpuFiles.data?.files ?? []])
-
   return (
     <div className="space-y-2">
-      <div className="max-h-40 space-y-1 overflow-y-auto rounded-md border p-2">
-        {groups.map(([label, files]) => (
-          <div key={label}>
-            <p className="text-xs font-medium text-muted-foreground">{label}</p>
-            {files.map((f) => (
-              <label key={f} className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={chosen.has(f)}
-                  onChange={(e) => toggle(f, e.target.checked)}
-                />
-                <span className="truncate" title={f}>
-                  {f}
-                </span>
-              </label>
-            ))}
-            {files.length === 0 && <p className="text-xs text-muted-foreground">（无）</p>}
-          </div>
-        ))}
-      </div>
-      <div className="flex items-center gap-2">
-        <Button size="sm" variant="outline" disabled={uploading} onClick={() => fileRef.current?.click()}>
-          上传本机图片
-        </Button>
-        {uploading && <span className="text-xs text-muted-foreground">上传中…</span>}
-        {error && <span className="text-xs text-destructive">{error}</span>}
-      </div>
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/*"
-        multiple
-        className="hidden"
-        onChange={(e) => {
-          if (e.target.files?.length) void onFiles(e.target.files)
-          e.target.value = ''
-        }}
-      />
+      <ImageMultiPick value={lines} onChange={(next) => onChange(next.join('\n'))} />
       <Textarea
         rows={3}
         value={text}
