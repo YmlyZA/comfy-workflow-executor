@@ -1,7 +1,8 @@
-import { useMutation } from '@tanstack/react-query'
-import { useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import type { ParamDef, ParamType } from '@cwe/shared'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { useEffect, useRef, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import type { EnumRef, ParamDef, ParamType } from '@cwe/shared'
+import type { TemplateDto } from '@/pages/templates'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -61,8 +62,45 @@ export default function TemplateImportPage() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
+  const [searchParams] = useSearchParams()
+  const from = searchParams.get('from')
+  const fromTemplates = useQuery({
+    queryKey: ['templates'],
+    queryFn: () => api<TemplateDto[]>('/templates'),
+    enabled: from !== null,
+  })
+  const fromLoaded = useRef(false)
+  useEffect(() => {
+    if (from === null || fromLoaded.current) return
+    if (fromTemplates.isError) {
+      fromLoaded.current = true
+      setError(`加载模板失败:${apiErrorMessage(fromTemplates.error)}`)
+      return
+    }
+    if (!fromTemplates.data) return
+    fromLoaded.current = true
+    const t = fromTemplates.data.find((x) => x.id === Number(from))
+    if (!t) {
+      setError(`模板不存在(from=${from}),可改用下方手动导入`)
+      return
+    }
+    const sel: Record<string, Selection> = {}
+    const refs = new Map<string, EnumRef>()
+    for (const p of t.params) {
+      const id = `${p.nodeId}.${p.inputName}`
+      sel[id] = { key: p.key, type: p.type, ...(p.enumRef ? { enumRef: p.enumRef } : {}) }
+      if (p.enumRef) refs.set(id, p.enumRef)
+    }
+    void ingest(t.comfyJson, `${t.name} 副本`, { sel, refs })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fromLoaded 保证只跑一次,ingest/error 依赖无需追踪
+  }, [from, fromTemplates.data, fromTemplates.isError])
+
   /** 返回是否成功导入(被更新的导入取代视为不成功,但不写任何状态) */
-  async function ingest(parsed: unknown, sourceName: string): Promise<boolean> {
+  async function ingest(
+    parsed: unknown,
+    sourceName: string,
+    preset?: { sel: Record<string, Selection>; refs: Map<string, EnumRef> },
+  ): Promise<boolean> {
     const seq = ++importSeq.current
     setError('')
     setValidation(null)
@@ -111,9 +149,15 @@ export default function TemplateImportPage() {
 
       if (seq !== importSeq.current) return false
 
-      const pre: Record<string, Selection> = {}
-      for (const s of suggestParams(comfyJson)) {
-        pre[`${s.nodeId}.${s.inputName}`] = { key: s.key, type: s.type }
+      // 从模板重选:预选与 enumRef 用源模板的 params(离线时 enum 类型也不丢);否则走智能预选
+      for (const [id, ref] of preset?.refs ?? []) {
+        if (!refs.has(id)) refs.set(id, ref)
+      }
+      const pre: Record<string, Selection> = preset ? { ...preset.sel } : {}
+      if (!preset) {
+        for (const s of suggestParams(comfyJson)) {
+          pre[`${s.nodeId}.${s.inputName}`] = { key: s.key, type: s.type }
+        }
       }
 
       setJson(comfyJson)
