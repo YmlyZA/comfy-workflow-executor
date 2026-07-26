@@ -32,6 +32,7 @@ import { useImageDims } from '@/hooks/use-image-dims'
 import { useDebouncedValue } from '@/hooks/use-debounced-value'
 import type { TemplateDto } from '@/pages/templates'
 import type { ParamDef } from '@cwe/shared'
+import type { BatchDetailDto } from '@/pages/batch-detail'
 
 export default function BatchNewPage() {
   const [search] = useSearchParams()
@@ -45,6 +46,29 @@ export default function BatchNewPage() {
   const [name, setName] = useState('')
   const [jobs, setJobs] = useState<ParamValues[]>([])
   const [error, setError] = useState('')
+  const [fromError, setFromError] = useState('')
+  const [initialRows, setInitialRows] = useState<ParamValues[] | undefined>(undefined)
+  const from = search.get('from')
+  const fromBatch = useQuery({
+    queryKey: ['batches', from],
+    queryFn: () => api<BatchDetailDto>(`/batches/${from}`),
+    enabled: from !== null,
+  })
+  const fromLoaded = useRef(false)
+  useEffect(() => {
+    if (from === null || fromLoaded.current) return
+    if (fromBatch.isError) {
+      fromLoaded.current = true
+      setFromError(`加载来源 batch 失败(from=${from}),可手动选择模板继续`)
+      return
+    }
+    if (!fromBatch.data) return
+    fromLoaded.current = true
+    const d = fromBatch.data
+    setTemplateId(String(d.template.id))
+    setName((prev) => prev || `${d.batch.name} 副本`)
+    setInitialRows(d.jobs.map((j) => j.params))
+  }, [from, fromBatch.data, fromBatch.isError])
 
   const submit = useMutation({
     mutationFn: () =>
@@ -62,7 +86,7 @@ export default function BatchNewPage() {
       <div className="flex items-end gap-4">
         <div className="space-y-1">
           <Label>模板</Label>
-          <Select value={templateId} onValueChange={(v) => { setTemplateId(v); setJobs([]) }}>
+          <Select value={templateId} onValueChange={(v) => { setTemplateId(v); setJobs([]); setInitialRows(undefined) }}>
             <SelectTrigger className="w-64">
               <SelectValue placeholder="选择模板" />
             </SelectTrigger>
@@ -80,6 +104,7 @@ export default function BatchNewPage() {
           <Input className="w-64" value={name} onChange={(e) => setName(e.target.value)} />
         </div>
       </div>
+      {fromError && <p className="text-sm text-destructive">{fromError}</p>}
 
       {template && (
         <Tabs key={template.id} defaultValue="table" onValueChange={() => setJobs([])}>
@@ -89,7 +114,7 @@ export default function BatchNewPage() {
             <TabsTrigger value="images">批量图片</TabsTrigger>
           </TabsList>
           <TabsContent value="table">
-            <TableEntry template={template} onChange={setJobs} />
+            <TableEntry template={template} onChange={setJobs} initialRows={initialRows} />
           </TabsContent>
           <TabsContent value="matrix">
             <MatrixEntry template={template} onChange={setJobs} />
@@ -138,11 +163,13 @@ export default function BatchNewPage() {
 function TableEntry({
   template,
   onChange,
+  initialRows,
 }: {
   template: TemplateDto
   onChange: (jobs: ParamValues[]) => void
+  initialRows?: ParamValues[]
 }) {
-  const [rows, setRows] = useState<ParamValues[]>([{}])
+  const [rows, setRows] = useState<ParamValues[]>(initialRows ?? [{}])
   const [csvOpen, setCsvOpen] = useState(false)
   const [csvText, setCsvText] = useState('')
   const [error, setError] = useState('')

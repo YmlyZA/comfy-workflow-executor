@@ -10,9 +10,10 @@ export function batchRoutes(deps: AppDeps) {
   app.get('/', (c) => c.json(repo.listBatches(deps.db)))
 
   app.get('/:id', (c) => {
-    const detail = repo.getBatchDetail(deps.db, Number(c.req.param('id')))
+    const id = Number(c.req.param('id'))
+    const detail = repo.getBatchDetail(deps.db, id)
     if (!detail) return c.json({ error: 'batch not found' }, 404)
-    return c.json(detail)
+    return c.json({ ...detail, nav: repo.getBatchNav(deps.db, id) })
   })
 
   app.delete('/:id', async (c) => {

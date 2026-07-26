@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useState } from 'react'
 import type { BatchStatus, JobStatus, ParamValues } from '@cwe/shared'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -12,6 +13,13 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { useEvents } from '@/hooks/use-events'
 import { api, downloadUrl, outputUrl } from '@/lib/api'
 import { statusVariant } from '@/pages/batches'
@@ -30,14 +38,17 @@ export interface JobDto {
   finishedAt: string | null
 }
 
-interface BatchDetailDto {
+export interface BatchDetailDto {
   batch: { id: number; name: string; status: BatchStatus; createdAt: string }
   template: TemplateDto
   jobs: JobDto[]
+  nav: { prevId: number | null; nextId: number | null }
 }
 
 export default function BatchDetailPage() {
   const { id } = useParams()
+  const navigate = useNavigate()
+  const [lightbox, setLightbox] = useState<number | null>(null)
   const qc = useQueryClient()
   const progress = useEvents()
   const { data } = useQuery({
@@ -61,6 +72,24 @@ export default function BatchDetailPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
+          <span className="flex gap-1">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={data.nav.prevId === null}
+              onClick={() => navigate(`/batches/${data.nav.prevId}`)}
+            >
+              ← 更早
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={data.nav.nextId === null}
+              onClick={() => navigate(`/batches/${data.nav.nextId}`)}
+            >
+              更新 →
+            </Button>
+          </span>
           <h1 className="text-xl font-semibold">{batch.name}</h1>
           <Badge variant={statusVariant[batch.status]}>{batch.status}</Badge>
           <span className="text-sm text-muted-foreground">模板：{template.name}</span>
@@ -76,6 +105,9 @@ export default function BatchDetailPage() {
               取消
             </Button>
           )}
+          <Button asChild variant="outline">
+            <Link to={`/batches/new?from=${batch.id}`}>以此新建</Link>
+          </Button>
           <Button asChild variant="outline">
             <a href={downloadUrl(batch.id)}>下载 ZIP</a>
           </Button>
@@ -129,13 +161,12 @@ export default function BatchDetailPage() {
         <div>
           <h2 className="mb-3 font-medium">结果画廊（{gallery.length}）</h2>
           <div className="grid grid-cols-4 gap-4">
-            {gallery.map(({ job, output }) => (
-              <a
+            {gallery.map(({ job, output }, i) => (
+              <button
+                type="button"
                 key={output.path}
-                href={outputUrl(output.path)}
-                target="_blank"
-                rel="noreferrer"
-                className="group space-y-1"
+                onClick={() => setLightbox(i)}
+                className="group space-y-1 text-left"
               >
                 <img
                   src={outputUrl(output.path)}
@@ -146,11 +177,80 @@ export default function BatchDetailPage() {
                 <p className="truncate font-mono text-xs text-muted-foreground">
                   #{job.sortOrder} {JSON.stringify(job.params)}
                 </p>
-              </a>
+              </button>
             ))}
           </div>
         </div>
       )}
+
+      {lightbox !== null && (
+        <Lightbox
+          items={gallery}
+          index={lightbox}
+          onClose={() => setLightbox(null)}
+          onIndex={setLightbox}
+        />
+      )}
     </div>
+  )
+}
+
+function Lightbox({
+  items,
+  index,
+  onClose,
+  onIndex,
+}: {
+  items: Array<{ job: JobDto; output: { path: string; filename: string } }>
+  index: number
+  onClose: () => void
+  onIndex: (i: number) => void
+}) {
+  const cur = items[index]
+  if (!cur) return null
+  return (
+    <Dialog open onOpenChange={(v) => { if (!v) onClose() }}>
+      <DialogContent
+        className="sm:max-w-4xl"
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowLeft' && index > 0) onIndex(index - 1)
+          if (e.key === 'ArrowRight' && index < items.length - 1) onIndex(index + 1)
+        }}
+      >
+        <DialogHeader>
+          <DialogTitle className="text-sm font-normal text-muted-foreground">
+            {index + 1} / {items.length} · #{cur.job.sortOrder} · {cur.output.filename}
+          </DialogTitle>
+        </DialogHeader>
+        <img
+          src={outputUrl(cur.output.path)}
+          alt={cur.output.filename}
+          className="max-h-[70vh] w-full rounded-md object-contain"
+        />
+        <p className="max-h-20 overflow-y-auto font-mono text-xs text-muted-foreground">
+          {JSON.stringify(cur.job.params)}
+        </p>
+        <DialogFooter className="sm:justify-between">
+          <span className="flex gap-2">
+            <Button size="sm" variant="outline" disabled={index === 0} onClick={() => onIndex(index - 1)}>
+              ←
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={index === items.length - 1}
+              onClick={() => onIndex(index + 1)}
+            >
+              →
+            </Button>
+          </span>
+          <Button asChild size="sm" variant="outline">
+            <a href={outputUrl(cur.output.path)} target="_blank" rel="noreferrer">
+              查看原图
+            </a>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

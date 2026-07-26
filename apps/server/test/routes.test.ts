@@ -184,6 +184,40 @@ describe('batches routes', () => {
   })
 })
 
+describe('GET /api/batches/:id nav', () => {
+  async function createBatchOn(templateId: number, name: string): Promise<number> {
+    const res = await app.request(`/api/templates/${templateId}/batches`, {
+      method: 'POST',
+      headers: H,
+      body: JSON.stringify({ name, jobs: [{ prompt: 'x' }] }),
+    })
+    expect(res.status).toBe(201)
+    return ((await res.json()) as { id: number }).id
+  }
+
+  async function navOf(id: number) {
+    const res = await app.request(`/api/batches/${id}`, { headers: H })
+    expect(res.status).toBe(200)
+    return ((await res.json()) as { nav: { prevId: number | null; nextId: number | null } }).nav
+  }
+
+  it('中间/首/尾 batch 的 prevId/nextId 正确', async () => {
+    const t = await createTemplate()
+    const a = await createBatchOn(t.id, 'a')
+    const b = await createBatchOn(t.id, 'b')
+    const c = await createBatchOn(t.id, 'c')
+    expect(await navOf(b)).toEqual({ prevId: a, nextId: c })
+    expect(await navOf(a)).toEqual({ prevId: null, nextId: b })
+    expect(await navOf(c)).toEqual({ prevId: b, nextId: null })
+  })
+
+  it('单 batch 双 null', async () => {
+    const t = await createTemplate()
+    const only = await createBatchOn(t.id, 'only')
+    expect(await navOf(only)).toEqual({ prevId: null, nextId: null })
+  })
+})
+
 describe('GET /api/uploads', () => {
   it('目录不存在返回空;有文件按修改时间倒序且跳过子目录', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'cwe-ls-'))

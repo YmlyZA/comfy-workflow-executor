@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, lt, sql } from 'drizzle-orm'
 import type { CreateBatchInput, CreateTemplateInput, OutputFile } from '@cwe/shared'
 import type { Db } from './index.js'
 import { batches, jobs, templates, type Batch, type Job, type Template } from './schema.js'
@@ -96,6 +96,13 @@ export function getBatchDetail(
   if (!template) return undefined
   const rows = db.select().from(jobs).where(eq(jobs.batchId, id)).orderBy(asc(jobs.sortOrder)).all()
   return { batch, template, jobs: rows }
+}
+
+/** 相邻 batch 导航:prev=更早(小于当前的最大 id),next=更新(大于当前的最小 id) */
+export function getBatchNav(db: Db, id: number): { prevId: number | null; nextId: number | null } {
+  const prev = db.select({ id: batches.id }).from(batches).where(lt(batches.id, id)).orderBy(desc(batches.id)).limit(1).get()
+  const next = db.select({ id: batches.id }).from(batches).where(gt(batches.id, id)).orderBy(asc(batches.id)).limit(1).get()
+  return { prevId: prev?.id ?? null, nextId: next?.id ?? null }
 }
 
 // -- executor queue --
