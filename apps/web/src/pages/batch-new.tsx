@@ -2,7 +2,7 @@ import { useMutation, useQueries, useQuery } from '@tanstack/react-query'
 import Papa from 'papaparse'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { computeLockedDim, expandMatrix, fitSource, type ParamValues } from '@cwe/shared'
+import { computeLockedDim, fitSource, type ParamValues } from '@cwe/shared'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -23,13 +23,13 @@ import {
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
-import { EnumValueSelect, optionsErrorText } from '@/components/enum-value-select'
+import { EnumValueSelect } from '@/components/enum-value-select'
 import { ImageMultiPick } from '@/components/image-multi-pick'
 import { ImageValueControl } from '@/components/image-value-control'
+import { MatrixEntry } from '@/components/matrix-entry'
 import { api } from '@/lib/api'
 import { useImageDims } from '@/hooks/use-image-dims'
 import { useDebouncedValue } from '@/hooks/use-debounced-value'
-import { useInputOptions } from '@/hooks/use-input-options'
 import type { TemplateDto } from '@/pages/templates'
 import type { ParamDef } from '@cwe/shared'
 
@@ -311,65 +311,6 @@ function TableEntry({
   )
 }
 
-function MatrixEntry({
-  template,
-  onChange,
-}: {
-  template: TemplateDto
-  onChange: (jobs: ParamValues[]) => void
-}) {
-  const [axes, setAxes] = useState<Record<string, string>>({})
-
-  const parsed = useMemo(() => {
-    const out: Record<string, Array<string | number>> = {}
-    for (const p of template.params) {
-      const lines = (axes[p.key] ?? '')
-        .split('\n')
-        .map((l) => l.trim())
-        .filter(Boolean)
-      out[p.key] =
-        p.type === 'number' || p.type === 'seed' ? lines.map(Number).filter((n) => !Number.isNaN(n)) : lines
-    }
-    return out
-  }, [axes, template])
-
-  const count = Object.values(parsed).reduce((acc, v) => acc * Math.max(v.length, 1), 1)
-
-  return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        {template.params.map((p) => (
-          <div key={p.key} className="space-y-1">
-            <Label>
-              {p.key}（{p.type}，一行一个值{p.default !== undefined ? `，留空用默认 ${p.default}` : ''}）
-            </Label>
-            {p.type === 'image' ? (
-              <ImageAxisPick
-                text={axes[p.key] ?? ''}
-                onChange={(v) => setAxes((prev) => ({ ...prev, [p.key]: v }))}
-              />
-            ) : p.type === 'enum' ? (
-              <EnumAxisPick
-                param={p}
-                text={axes[p.key] ?? ''}
-                onChange={(v) => setAxes((prev) => ({ ...prev, [p.key]: v }))}
-              />
-            ) : (
-              <Textarea
-                rows={4}
-                value={axes[p.key] ?? ''}
-                onChange={(e) => setAxes((prev) => ({ ...prev, [p.key]: e.target.value }))}
-              />
-            )}
-          </div>
-        ))}
-      </div>
-      <Button size="sm" onClick={() => onChange(expandMatrix(parsed))}>
-        生成组合（约 {count} 个任务）
-      </Button>
-    </div>
-  )
-}
 
 function ImagesEntry({
   template,
@@ -597,80 +538,7 @@ function dimsErrorText(error: unknown): string {
   return '无法获取源图尺寸'
 }
 
-/** enum 参数多选(矩阵轴):勾选项以换行拼接写回 axes,复用现有解析 */
-function EnumAxisPick({
-  param,
-  text,
-  onChange,
-}: {
-  param: ParamDef
-  text: string
-  onChange: (v: string) => void
-}) {
-  const { data, isError, error } = useInputOptions(param)
-  if (!data || isError) {
-    return (
-      <Textarea
-        rows={4}
-        placeholder={isError ? optionsErrorText(error, '一行一个值') : undefined}
-        value={text}
-        onChange={(e) => onChange(e.target.value)}
-      />
-    )
-  }
-  const chosen = new Set(
-    text
-      .split('\n')
-      .map((l) => l.trim())
-      .filter(Boolean),
-  )
-  return (
-    <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border p-2">
-      {data.options.map((o) => (
-        <label key={o} className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={chosen.has(o)}
-            onChange={(e) => {
-              const next = new Set(chosen)
-              if (e.target.checked) next.add(o)
-              else next.delete(o)
-              onChange([...next].join('\n'))
-            }}
-          />
-          <span className="truncate" title={o}>
-            {o}
-          </span>
-        </label>
-      ))}
-    </div>
-  )
-}
 
-/** image 参数矩阵轴:复用 ImageMultiPick(换行文本 ↔ string[] 适配) + 手填 textarea */
-function ImageAxisPick({
-  text,
-  onChange,
-}: {
-  text: string
-  onChange: (v: string) => void
-}) {
-  const lines = text
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean)
-  return (
-    <div className="space-y-2">
-      <ImageMultiPick value={lines} onChange={(next) => onChange(next.join('\n'))} />
-      <Textarea
-        rows={3}
-        value={text}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder="也可手填,一行一个文件名"
-      />
-    </div>
-  )
-}
 
 /** 锁定比例时的宽/高单元格:编辑本格后按该行图片实际比例自动填另一格 */
 function DimCell({
