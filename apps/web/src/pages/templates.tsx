@@ -44,21 +44,35 @@ const columns: ColumnDef<TemplateDto, any>[] = [
     accessorKey: 'name',
     meta: { title: '名称' },
     header: ({ column }) => <SortableHeader column={column}>名称</SortableHeader>,
-    cell: ({ row }) => <span className="font-medium">{row.original.name}</span>,
+    cell: ({ row }) => (
+      <span className="block max-w-48 truncate font-medium" title={row.original.name}>
+        {row.original.name}
+      </span>
+    ),
   },
   {
     id: 'params',
     meta: { title: '参数' },
     header: '参数',
-    cell: ({ row }) => (
-      <span className="space-x-1">
-        {row.original.params.map((p) => (
-          <Badge key={p.key} variant="secondary">
-            {p.key}:{p.type}
-          </Badge>
-        ))}
-      </span>
-    ),
+    cell: ({ row }) => {
+      const params = row.original.params
+      const rest = params.length - 3
+      return (
+        <span
+          className="flex items-center gap-1 whitespace-nowrap"
+          title={params.map((p) => `${p.key}:${p.type}`).join(', ')}
+        >
+          {params.slice(0, 3).map((p) => (
+            <Badge key={p.key} variant="secondary" className="max-w-28">
+              <span className="truncate">
+                {p.key}:{p.type}
+              </span>
+            </Badge>
+          ))}
+          {rest > 0 && <Badge variant="outline">+{rest}</Badge>}
+        </span>
+      )
+    },
     enableSorting: false,
     enableGlobalFilter: false,
   },
