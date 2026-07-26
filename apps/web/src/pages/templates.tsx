@@ -64,7 +64,7 @@ const columns: ColumnDef<TemplateDto, any>[] = [
         >
           {params.slice(0, 3).map((p) => (
             <Badge key={p.key} variant="secondary" className="max-w-28">
-              <span className="truncate">
+              <span className="min-w-0 truncate">
                 {p.key}:{p.type}
               </span>
             </Badge>
