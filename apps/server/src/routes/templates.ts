@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { createBatchSchema, createTemplateSchema } from '@cwe/shared'
+import { createBatchSchema, createTemplateSchema, renameTemplateSchema } from '@cwe/shared'
 import * as repo from '../db/repo.js'
 import type { AppDeps } from '../app.js'
 
@@ -19,6 +19,13 @@ export function templateRoutes(deps: AppDeps) {
     if (res === 'unknown-id') return c.json({ error: '包含不存在的模板 id' }, 404)
     if (res === 'incomplete') return c.json({ error: 'ids 必须包含全部模板且不重复' }, 400)
     return c.json({ ok: true })
+  })
+
+  app.patch('/:id', async (c) => {
+    const { name } = renameTemplateSchema.parse(await c.req.json())
+    const t = repo.renameTemplate(deps.db, Number(c.req.param('id')), name)
+    if (!t) return c.json({ error: 'template not found' }, 404)
+    return c.json(t)
   })
 
   app.post('/', async (c) => {

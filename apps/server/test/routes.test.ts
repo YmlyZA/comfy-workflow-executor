@@ -106,6 +106,34 @@ describe('PATCH /api/templates/order', () => {
   })
 })
 
+describe('PATCH /api/templates/:id', () => {
+  it('改名成功,返回新名且列表可见', async () => {
+    const t = await createTemplate()
+    const res = await app.request(`/api/templates/${t.id}`, {
+      method: 'PATCH', headers: H, body: JSON.stringify({ name: '新名字' }),
+    })
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as { name: string }).name).toBe('新名字')
+    const list = (await (await app.request('/api/templates', { headers: H })).json()) as Array<{ name: string }>
+    expect(list[0]!.name).toBe('新名字')
+  })
+
+  it('未知 id 404', async () => {
+    const res = await app.request('/api/templates/999', {
+      method: 'PATCH', headers: H, body: JSON.stringify({ name: 'x' }),
+    })
+    expect(res.status).toBe(404)
+  })
+
+  it('空名 400', async () => {
+    const t = await createTemplate()
+    const res = await app.request(`/api/templates/${t.id}`, {
+      method: 'PATCH', headers: H, body: JSON.stringify({ name: '' }),
+    })
+    expect(res.status).toBe(400)
+  })
+})
+
 describe('batches routes', () => {
   it('creates batch with jobs and reads detail', async () => {
     const t = await createTemplate()
