@@ -47,4 +47,6 @@ export interface OutputFile {
   /** 相对 outputs 根目录的路径，如 "3/0-cat-00001.png" */
   path: string
   filename: string
+  /** GPU 侧引用(type 恒为 output 不存);旧数据无此字段 → GPU 侧删除跳过 */
+  gpu?: { filename: string; subfolder: string }
 }
