@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ColumnDef, Table as TanstackTable } from '@tanstack/react-table'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { ParamDef } from '@cwe/shared'
+import { MoreHorizontalIcon } from 'lucide-react'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,6 +17,20 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { Input } from '@/components/ui/input'
 import { DataTable, SortableHeader, selectColumn } from '@/components/data-table/data-table'
 import { DragHandle } from '@/components/data-table/sortable-rows'
 import { api } from '@/lib/api'
@@ -85,13 +100,7 @@ const columns: ColumnDef<TemplateDto, any>[] = [
   {
     id: 'actions',
     header: '',
-    cell: ({ row }) => (
-      <span className="text-right">
-        <Button asChild size="sm" variant="outline">
-          <Link to={`/batches/new?template=${row.original.id}`}>新建 Batch</Link>
-        </Button>
-      </span>
-    ),
+    cell: ({ row }) => <RowActions t={row.original} />,
     enableSorting: false,
     enableHiding: false,
     enableGlobalFilter: false,
@@ -196,5 +205,87 @@ function TemplatesBulkDelete({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  )
+}
+
+function RowActions({ t }: { t: TemplateDto }) {
+  const [renameOpen, setRenameOpen] = useState(false)
+  return (
+    <span className="flex items-center justify-end gap-1 whitespace-nowrap">
+      <Button asChild size="sm" variant="outline">
+        <Link to={`/batches/new?template=${t.id}`}>新建 Batch</Link>
+      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button size="sm" variant="ghost" className="px-2" aria-label="更多操作">
+            <MoreHorizontalIcon className="size-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onSelect={() => setRenameOpen(true)}>重命名</DropdownMenuItem>
+          <DropdownMenuItem asChild>
+            <Link to={`/templates/new?from=${t.id}`}>重选参数</Link>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <RenameDialog t={t} open={renameOpen} onOpenChange={setRenameOpen} />
+    </span>
+  )
+}
+
+function RenameDialog({
+  t,
+  open,
+  onOpenChange,
+}: {
+  t: TemplateDto
+  open: boolean
+  onOpenChange: (v: boolean) => void
+}) {
+  const qc = useQueryClient()
+  const [name, setName] = useState(t.name)
+  const [error, setError] = useState('')
+  // 每次打开回到当前名并清错(列表刷新后重开也拿到最新名)
+  useEffect(() => {
+    if (open) {
+      setName(t.name)
+      setError('')
+    }
+  }, [open, t.name])
+  const rename = useMutation({
+    mutationFn: (next: string) =>
+      api(`/templates/${t.id}`, { method: 'PATCH', body: JSON.stringify({ name: next }) }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['templates'] })
+      onOpenChange(false)
+    },
+    onError: (e) => setError(apiErrorText(e)),
+  })
+  const trimmed = name.trim()
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>重命名模板</DialogTitle>
+        </DialogHeader>
+        <Input
+          value={name}
+          autoFocus
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && trimmed && !rename.isPending) rename.mutate(trimmed)
+          }}
+        />
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            取消
+          </Button>
+          <Button disabled={!trimmed || rename.isPending} onClick={() => rename.mutate(trimmed)}>
+            保存
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

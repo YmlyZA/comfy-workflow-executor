@@ -31,6 +31,9 @@ export const createTemplateSchema = z.object({
 })
 export type CreateTemplateInput = z.infer<typeof createTemplateSchema>
 
+export const renameTemplateSchema = z.object({ name: z.string().min(1) })
+export type RenameTemplateInput = z.infer<typeof renameTemplateSchema>
+
 export const createBatchSchema = z.object({
   name: z.string().min(1),
   jobs: z.array(paramValuesSchema).min(1),

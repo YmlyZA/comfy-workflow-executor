@@ -33,6 +33,10 @@ export function deleteTemplate(db: Db, id: number): void {
   db.delete(templates).where(eq(templates.id, id)).run()
 }
 
+export function renameTemplate(db: Db, id: number, name: string): Template | undefined {
+  return db.update(templates).set({ name }).where(eq(templates.id, id)).returning().get()
+}
+
 /** 全量重排:ids 必须恰好覆盖全部模板且不重复 */
 export function reorderTemplates(db: Db, ids: number[]): 'ok' | 'unknown-id' | 'incomplete' {
   return db.transaction((tx) => {
