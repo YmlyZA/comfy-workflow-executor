@@ -17,6 +17,26 @@ export function batchRoutes(deps: AppDeps) {
 
   app.delete('/:id', async (c) => {
     const id = Number(c.req.param('id'))
+    // purgeGpu 需在删 DB 记录前收集 GPU 侧输出引用(按 subfolder/filename 去重)
+    const purgeGpu = c.req.query('purgeGpu') === '1'
+    const gpuRefs: Array<{ filename: string; subfolder: string }> = []
+    let gpuSkipped = 0
+    if (purgeGpu) {
+      const seen = new Set<string>()
+      for (const job of repo.getBatchDetail(deps.db, id)?.jobs ?? []) {
+        for (const out of job.outputs ?? []) {
+          if (!out.gpu) {
+            gpuSkipped++
+            continue
+          }
+          const key = `${out.gpu.subfolder}/${out.gpu.filename}`
+          if (!seen.has(key)) {
+            seen.add(key)
+            gpuRefs.push(out.gpu)
+          }
+        }
+      }
+    }
     const res = repo.deleteBatch(deps.db, id)
     if (res === 'not-found') return c.json({ error: 'batch not found' }, 404)
     if (res === 'running') return c.json({ error: 'batch is running' }, 409)
@@ -28,8 +48,26 @@ export function batchRoutes(deps: AppDeps) {
         purgeFailed = true
       }
     }
+    let gpuPurgeFailed = false
+    if (purgeGpu && gpuRefs.length > 0) {
+      if (!deps.comfy) {
+        gpuPurgeFailed = true
+      } else {
+        try {
+          const r = await deps.comfy.cweDeleteOutputFiles(gpuRefs)
+          if (r.failed.length > 0) gpuPurgeFailed = true
+        } catch {
+          gpuPurgeFailed = true
+        }
+      }
+    }
     deps.events.emit('event', { type: 'batch-updated', batchId: id, status: 'deleted' })
-    return c.json(purgeFailed ? { ok: true, purgeFailed: true } : { ok: true })
+    return c.json({
+      ok: true,
+      ...(purgeFailed ? { purgeFailed: true } : {}),
+      ...(gpuPurgeFailed ? { gpuPurgeFailed: true } : {}),
+      ...(gpuSkipped > 0 ? { gpuSkipped } : {}),
+    })
   })
 
   app.post('/:id/cancel', async (c) => {

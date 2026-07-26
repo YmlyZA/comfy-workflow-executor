@@ -6,6 +6,8 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { createApp } from '../src/app.js'
 import { loadConfig } from '../src/config.js'
 import { createDb, type Db } from '../src/db/index.js'
+import * as repo from '../src/db/repo.js'
+import { FakeComfy } from './fake-comfy.js'
 
 let db: Db
 let app: ReturnType<typeof createApp>
@@ -253,5 +255,119 @@ describe('DELETE /api/batches/:id', () => {
     const del = await localApp.request(`/api/batches/${bid}`, { method: 'DELETE', headers: H })
     expect(del.status).toBe(200)
     expect(existsSync(outDir)).toBe(true)
+  })
+})
+
+describe('DELETE /api/batches/:id purgeGpu', () => {
+  function makeComfyApp() {
+    const comfy = new FakeComfy()
+    const localDb = createDb(':memory:')
+    const localApp = createApp({
+      config: loadConfig({ AUTH_TOKEN: 'secret' }),
+      db: localDb,
+      comfy,
+      events: new EventEmitter(),
+    })
+    return { comfy, localDb, localApp }
+  }
+
+  /** 建一个已完成 batch:job0 两个输出同 gpu 引用(测去重),job1 一个无引用输出(测跳过) */
+  function seedFinished(localDb: Db) {
+    const t = repo.createTemplate(localDb, {
+      name: 'T',
+      comfyJson: templateBody.comfyJson,
+      params: templateBody.params as any,
+    })
+    const b = repo.createBatch(localDb, t.id, { name: 'B', jobs: [{ prompt: 'a' }, { prompt: 'b' }] })
+    const c1 = repo.claimNextJob(localDb)!
+    repo.finishJob(localDb, c1.job.id, [
+      { path: `${b.id}/0-0-a.png`, filename: '0-0-a.png', gpu: { filename: 'a.png', subfolder: 'sub' } },
+      { path: `${b.id}/0-1-b.png`, filename: '0-1-b.png', gpu: { filename: 'a.png', subfolder: 'sub' } },
+    ])
+    const c2 = repo.claimNextJob(localDb)!
+    repo.finishJob(localDb, c2.job.id, [{ path: `${b.id}/1-0-old.png`, filename: '1-0-old.png' }])
+    repo.markBatchCompletedIfDone(localDb, b.id)
+    return b
+  }
+
+  it('收集引用去重传给扩展,无引用输出计入 gpuSkipped', async () => {
+    const { comfy, localDb, localApp } = makeComfyApp()
+    const b = seedFinished(localDb)
+    const res = await localApp.request(`/api/batches/${b.id}?purgeGpu=1`, {
+      method: 'DELETE',
+      headers: H,
+    })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true, gpuSkipped: 1 })
+    expect(comfy.cweDeleted).toEqual([[{ filename: 'a.png', subfolder: 'sub' }]])
+  })
+
+  it('扩展调用抛错时 gpuPurgeFailed 且 batch 已删', async () => {
+    const { comfy, localDb, localApp } = makeComfyApp()
+    const b = seedFinished(localDb)
+    comfy.cweDeleteOutputFiles = async () => {
+      throw new Error('extension missing')
+    }
+    const res = await localApp.request(`/api/batches/${b.id}?purgeGpu=1`, {
+      method: 'DELETE',
+      headers: H,
+    })
+    const body = (await res.json()) as any
+    expect(body.gpuPurgeFailed).toBe(true)
+    expect((await localApp.request(`/api/batches/${b.id}`, { headers: H })).status).toBe(404)
+  })
+
+  it('扩展返回 failed 非空时 gpuPurgeFailed', async () => {
+    const { comfy, localDb, localApp } = makeComfyApp()
+    const b = seedFinished(localDb)
+    comfy.cweDeleteResult = { deleted: 0, missing: 0, failed: ['sub/a.png'] }
+    const res = await localApp.request(`/api/batches/${b.id}?purgeGpu=1`, {
+      method: 'DELETE',
+      headers: H,
+    })
+    expect(((await res.json()) as any).gpuPurgeFailed).toBe(true)
+  })
+
+  it('全部输出无 gpu 引用时不调扩展', async () => {
+    const { comfy, localDb, localApp } = makeComfyApp()
+    const t = repo.createTemplate(localDb, {
+      name: 'T2',
+      comfyJson: templateBody.comfyJson,
+      params: templateBody.params as any,
+    })
+    const b = repo.createBatch(localDb, t.id, { name: 'B2', jobs: [{ prompt: 'a' }] })
+    const c1 = repo.claimNextJob(localDb)!
+    repo.finishJob(localDb, c1.job.id, [{ path: `${b.id}/0-0-x.png`, filename: '0-0-x.png' }])
+    repo.markBatchCompletedIfDone(localDb, b.id)
+    const res = await localApp.request(`/api/batches/${b.id}?purgeGpu=1`, {
+      method: 'DELETE',
+      headers: H,
+    })
+    expect(await res.json()).toEqual({ ok: true, gpuSkipped: 1 })
+    expect(comfy.cweDeleted).toHaveLength(0)
+  })
+
+  it('不带 purgeGpu 时不收集也不调扩展', async () => {
+    const { comfy, localDb, localApp } = makeComfyApp()
+    const b = seedFinished(localDb)
+    const res = await localApp.request(`/api/batches/${b.id}`, { method: 'DELETE', headers: H })
+    expect(await res.json()).toEqual({ ok: true })
+    expect(comfy.cweDeleted).toHaveLength(0)
+  })
+
+  it('comfy 未配置且有引用时 gpuPurgeFailed', async () => {
+    const localDb = createDb(':memory:')
+    const localApp = createApp({
+      config: loadConfig({ AUTH_TOKEN: 'secret' }),
+      db: localDb,
+      comfy: null,
+      events: new EventEmitter(),
+    })
+    const b = seedFinished(localDb)
+    const res = await localApp.request(`/api/batches/${b.id}?purgeGpu=1`, {
+      method: 'DELETE',
+      headers: H,
+    })
+    expect(((await res.json()) as any).gpuPurgeFailed).toBe(true)
   })
 })
