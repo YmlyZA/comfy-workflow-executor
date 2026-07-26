@@ -30,7 +30,7 @@ export interface JobDto {
   finishedAt: string | null
 }
 
-interface BatchDetailDto {
+export interface BatchDetailDto {
   batch: { id: number; name: string; status: BatchStatus; createdAt: string }
   template: TemplateDto
   jobs: JobDto[]
