@@ -4,6 +4,7 @@ import BatchDetailPage from '@/pages/batch-detail'
 import BatchNewPage from '@/pages/batch-new'
 import BatchesPage from '@/pages/batches'
 import LoginPage from '@/pages/login'
+import PromptsPage from '@/pages/prompts'
 import TemplateImportPage from '@/pages/template-import'
 import TemplatesPage from '@/pages/templates'
 
@@ -20,6 +21,9 @@ function RequireToken() {
         <Link to="/templates" className="text-sm hover:underline">
           Templates
         </Link>
+        <Link to="/prompts" className="text-sm hover:underline">
+          Prompt 库
+        </Link>
       </nav>
       <Outlet />
     </div>
@@ -34,6 +38,7 @@ export default function App() {
         <Route path="/" element={<Navigate to="/batches" replace />} />
         <Route path="/templates" element={<TemplatesPage />} />
         <Route path="/templates/new" element={<TemplateImportPage />} />
+        <Route path="/prompts" element={<PromptsPage />} />
         <Route path="/batches" element={<BatchesPage />} />
         <Route path="/batches/new" element={<BatchNewPage />} />
         <Route path="/batches/:id" element={<BatchDetailPage />} />
