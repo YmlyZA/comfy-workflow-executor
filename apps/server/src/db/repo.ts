@@ -216,6 +216,45 @@ export function retryFailedJobs(db: Db, batchId: number): number {
   })
 }
 
+export type RerollResult =
+  | { kind: 'ok'; job: Job }
+  | { kind: 'batch-not-found' }
+  | { kind: 'job-not-found' }
+  | { kind: 'not-succeeded' }
+  | { kind: 'no-seed' }
+
+/** 重roll:复制成功 job 的参数,seed 参数换独立随机值,追加到批尾并把 batch 置回 running */
+export function rerollJob(db: Db, batchId: number, jobId: number): RerollResult {
+  return db.transaction((tx) => {
+    const batch = tx.select().from(batches).where(eq(batches.id, batchId)).get()
+    if (!batch) return { kind: 'batch-not-found' as const }
+    const src = tx
+      .select()
+      .from(jobs)
+      .where(and(eq(jobs.id, jobId), eq(jobs.batchId, batchId)))
+      .get()
+    if (!src) return { kind: 'job-not-found' as const }
+    if (src.status !== 'succeeded') return { kind: 'not-succeeded' as const }
+    const template = tx.select().from(templates).where(eq(templates.id, batch.templateId)).get()
+    const seedKeys = (template?.params ?? []).filter((p) => p.type === 'seed').map((p) => p.key)
+    if (seedKeys.length === 0) return { kind: 'no-seed' as const }
+    const params = { ...src.params }
+    for (const key of seedKeys) params[key] = Math.floor(Math.random() * 2 ** 31)
+    const max = tx
+      .select({ m: sql<number>`coalesce(max(${jobs.sortOrder}), -1)` })
+      .from(jobs)
+      .where(eq(jobs.batchId, batchId))
+      .get()
+    const job = tx
+      .insert(jobs)
+      .values({ batchId, sortOrder: (max?.m ?? -1) + 1, params })
+      .returning()
+      .get()
+    tx.update(batches).set({ status: 'running' }).where(eq(batches.id, batchId)).run()
+    return { kind: 'ok' as const, job }
+  })
+}
+
 /** 状态检查与删除同事务,避免与执行器认领竞态;jobs 无级联须先删 */
 export function deleteBatch(db: Db, id: number): 'ok' | 'not-found' | 'running' {
   return db.transaction((tx) => {
