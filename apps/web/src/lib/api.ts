@@ -45,3 +45,17 @@ export function comfyInputFileUrl(name: string): string {
 export function thumbUrl(source: 'uploads' | 'comfy', name: string): string {
   return `/api/thumbs?source=${source}&name=${encodeURIComponent(name)}&token=${encodeURIComponent(getToken())}`
 }
+
+export function backupExportUrl(): string {
+  return `/api/export?token=${encodeURIComponent(getToken())}`
+}
+
+/** 导入备份 zip:raw body 上传(不 multipart),后端整体替换数据 */
+export async function importBackup(file: File): Promise<void> {
+  const res = await fetch('/api/import', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/zip' },
+    body: file,
+  })
+  if (!res.ok) throw new Error(await res.text())
+}
