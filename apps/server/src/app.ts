@@ -11,6 +11,7 @@ import { eventRoutes } from './routes/events.js'
 import { downloadRoute, outputRoutes, uploadRoutes } from './routes/files.js'
 import { comfyRoutes } from './routes/comfy.js'
 import { inputHistoryRoutes } from './routes/input-history.js'
+import { promptRoutes } from './routes/prompts.js'
 import { thumbRoutes } from './routes/thumbs.js'
 
 export interface AppDeps {
@@ -40,6 +41,7 @@ export function createApp(deps: AppDeps) {
   app.route('/api/uploads', uploadRoutes(deps))
   app.route('/api/thumbs', thumbRoutes(deps))
   app.route('/api/input-history', inputHistoryRoutes(deps))
+  app.route('/api/prompts', promptRoutes(deps))
   app.route('/api/outputs', outputRoutes(deps))
   app.route('/api/batches', downloadRoute(deps))
   app.route('/api/batches', batchRoutes(deps))
