@@ -73,7 +73,15 @@ export default function BatchDetailPage() {
       setRerollMsg(`已追加 #${r.sortOrder}`)
       void qc.invalidateQueries({ queryKey: ['batches'] })
     },
-    onError: (e) => setRerollMsg(e instanceof Error ? e.message : '重roll失败'),
+    onError: (e) => {
+      // api() 抛的是响应原文,可能是 {"error":"..."} JSON,取其中文案
+      const raw = e instanceof Error ? e.message : ''
+      try {
+        setRerollMsg((JSON.parse(raw) as { error?: string }).error ?? '重roll失败')
+      } catch {
+        setRerollMsg(raw || '重roll失败')
+      }
+    },
   })
 
   if (!data) return null
@@ -199,7 +207,7 @@ export default function BatchDetailPage() {
                 <Button
                   size="sm"
                   variant="secondary"
-                  className="absolute top-1 right-1 hidden h-7 px-2 group-hover:flex"
+                  className="absolute top-1 right-1 hidden h-7 px-2 group-hover:flex disabled:pointer-events-auto"
                   disabled={!hasSeed || reroll.isPending}
                   title={hasSeed ? '重roll:同参数换随机 seed 追加一张' : '模板没有 seed 参数'}
                   onClick={() => reroll.mutate(job.id)}
@@ -286,6 +294,7 @@ function Lightbox({
             <Button
               size="sm"
               variant="outline"
+              className="disabled:pointer-events-auto"
               disabled={!hasSeed || rerollPending}
               title={hasSeed ? '同参数换随机 seed 追加一张' : '模板没有 seed 参数'}
               onClick={() => onReroll(cur.job.id)}
