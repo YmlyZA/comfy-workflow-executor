@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { DicesIcon } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useState } from 'react'
 import type { BatchStatus, JobStatus, ParamValues } from '@cwe/shared'
@@ -62,11 +63,25 @@ export default function BatchDetailPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['batches'] }),
   })
 
+  const [rerollMsg, setRerollMsg] = useState('')
+  const reroll = useMutation({
+    mutationFn: (jobId: number) =>
+      api<{ jobId: number; sortOrder: number }>(`/batches/${id}/jobs/${jobId}/reroll`, {
+        method: 'POST',
+      }),
+    onSuccess: (r) => {
+      setRerollMsg(`已追加 #${r.sortOrder}`)
+      void qc.invalidateQueries({ queryKey: ['batches'] })
+    },
+    onError: (e) => setRerollMsg(e instanceof Error ? e.message : '重roll失败'),
+  })
+
   if (!data) return null
   const { batch, template, jobs } = data
   const done = jobs.filter((j) => ['succeeded', 'failed', 'canceled'].includes(j.status)).length
   const failed = jobs.filter((j) => j.status === 'failed').length
   const gallery = jobs.filter((j) => j.status === 'succeeded').flatMap((j) => (j.outputs ?? []).map((o) => ({ job: j, output: o })))
+  const hasSeed = template.params.some((p) => p.type === 'seed')
 
   return (
     <div className="space-y-6">
@@ -159,25 +174,39 @@ export default function BatchDetailPage() {
 
       {gallery.length > 0 && (
         <div>
-          <h2 className="mb-3 font-medium">结果画廊（{gallery.length}）</h2>
+          <h2 className="mb-3 font-medium">
+            结果画廊（{gallery.length}）
+            {rerollMsg && <span className="ml-2 text-xs text-muted-foreground">{rerollMsg}</span>}
+          </h2>
           <div className="grid grid-cols-4 gap-4">
             {gallery.map(({ job, output }, i) => (
-              <button
-                type="button"
-                key={output.path}
-                onClick={() => setLightbox(i)}
-                className="group space-y-1 text-left"
-              >
-                <img
-                  src={outputUrl(output.path)}
-                  alt={output.filename}
-                  loading="lazy"
-                  className="aspect-square w-full rounded-md border object-cover transition group-hover:opacity-80"
-                />
-                <p className="truncate font-mono text-xs text-muted-foreground">
-                  #{job.sortOrder} {JSON.stringify(job.params)}
-                </p>
-              </button>
+              <div key={output.path} className="group relative space-y-1">
+                <button
+                  type="button"
+                  onClick={() => setLightbox(i)}
+                  className="w-full space-y-1 text-left"
+                >
+                  <img
+                    src={outputUrl(output.path)}
+                    alt={output.filename}
+                    loading="lazy"
+                    className="aspect-square w-full rounded-md border object-cover transition group-hover:opacity-80"
+                  />
+                  <p className="truncate font-mono text-xs text-muted-foreground">
+                    #{job.sortOrder} {JSON.stringify(job.params)}
+                  </p>
+                </button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="absolute top-1 right-1 hidden h-7 px-2 group-hover:flex"
+                  disabled={!hasSeed || reroll.isPending}
+                  title={hasSeed ? '重roll:同参数换随机 seed 追加一张' : '模板没有 seed 参数'}
+                  onClick={() => reroll.mutate(job.id)}
+                >
+                  <DicesIcon className="size-4" />
+                </Button>
+              </div>
             ))}
           </div>
         </div>
@@ -189,6 +218,9 @@ export default function BatchDetailPage() {
           index={lightbox}
           onClose={() => setLightbox(null)}
           onIndex={setLightbox}
+          hasSeed={hasSeed}
+          rerollPending={reroll.isPending}
+          onReroll={(jobId) => reroll.mutate(jobId)}
         />
       )}
     </div>
@@ -200,11 +232,17 @@ function Lightbox({
   index,
   onClose,
   onIndex,
+  hasSeed,
+  rerollPending,
+  onReroll,
 }: {
   items: Array<{ job: JobDto; output: { path: string; filename: string } }>
   index: number
   onClose: () => void
   onIndex: (i: number) => void
+  hasSeed: boolean
+  rerollPending: boolean
+  onReroll: (jobId: number) => void
 }) {
   const cur = items[index]
   if (!cur) return null
@@ -244,11 +282,23 @@ function Lightbox({
               →
             </Button>
           </span>
-          <Button asChild size="sm" variant="outline">
-            <a href={outputUrl(cur.output.path)} target="_blank" rel="noreferrer">
-              查看原图
-            </a>
-          </Button>
+          <span className="flex gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!hasSeed || rerollPending}
+              title={hasSeed ? '同参数换随机 seed 追加一张' : '模板没有 seed 参数'}
+              onClick={() => onReroll(cur.job.id)}
+            >
+              <DicesIcon className="size-4" />
+              重roll
+            </Button>
+            <Button asChild size="sm" variant="outline">
+              <a href={outputUrl(cur.output.path)} target="_blank" rel="noreferrer">
+                查看原图
+              </a>
+            </Button>
+          </span>
         </DialogFooter>
       </DialogContent>
     </Dialog>
