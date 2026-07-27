@@ -1,5 +1,6 @@
 import { Link, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import { getToken } from '@/lib/api'
+import BackupPage from '@/pages/backup'
 import BatchDetailPage from '@/pages/batch-detail'
 import BatchNewPage from '@/pages/batch-new'
 import BatchesPage from '@/pages/batches'
@@ -24,6 +25,9 @@ function RequireToken() {
         <Link to="/prompts" className="text-sm hover:underline">
           Prompt 库
         </Link>
+        <Link to="/backup" className="text-sm hover:underline">
+          数据备份
+        </Link>
       </nav>
       <Outlet />
     </div>
@@ -39,6 +43,7 @@ export default function App() {
         <Route path="/templates" element={<TemplatesPage />} />
         <Route path="/templates/new" element={<TemplateImportPage />} />
         <Route path="/prompts" element={<PromptsPage />} />
+        <Route path="/backup" element={<BackupPage />} />
         <Route path="/batches" element={<BatchesPage />} />
         <Route path="/batches/new" element={<BatchNewPage />} />
         <Route path="/batches/:id" element={<BatchDetailPage />} />

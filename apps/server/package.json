@@ -18,6 +18,7 @@
     "image-size": "^2.0.2",
     "sharp": "^0.35.3",
     "ws": "^8.18.3",
+    "yauzl": "^3.4.0",
     "zod": "^4.0.5"
   },
   "devDependencies": {
@@ -25,6 +26,7 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.15.0",
     "@types/ws": "^8.18.1",
+    "@types/yauzl": "^3.4.0",
     "tsup": "^8.5.0",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3",
