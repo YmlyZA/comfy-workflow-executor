@@ -88,5 +88,24 @@ export function batchRoutes(deps: AppDeps) {
     return c.json({ retried })
   })
 
+  app.post('/:id/jobs/:jobId/reroll', (c) => {
+    const id = Number(c.req.param('id'))
+    const jobId = Number(c.req.param('jobId'))
+    const res = repo.rerollJob(deps.db, id, jobId)
+    if (res.kind === 'batch-not-found') return c.json({ error: 'batch not found' }, 404)
+    if (res.kind === 'job-not-found') return c.json({ error: 'job not found' }, 404)
+    if (res.kind === 'not-succeeded') return c.json({ error: '只能重roll成功的任务' }, 400)
+    if (res.kind === 'no-seed')
+      return c.json({ error: '模板没有 seed 参数,重roll 会生成相同图片' }, 409)
+    deps.events.emit('event', {
+      type: 'job-updated',
+      jobId: res.job.id,
+      batchId: id,
+      status: 'pending',
+    })
+    deps.events.emit('event', { type: 'batch-updated', batchId: id, status: 'running' })
+    return c.json({ jobId: res.job.id, sortOrder: res.job.sortOrder }, 201)
+  })
+
   return app
 }
