@@ -12,12 +12,15 @@ import { downloadRoute, outputRoutes, uploadRoutes } from './routes/files.js'
 import { comfyRoutes } from './routes/comfy.js'
 import { inputHistoryRoutes } from './routes/input-history.js'
 import { thumbRoutes } from './routes/thumbs.js'
+import { backupRoutes } from './routes/backup.js'
 
 export interface AppDeps {
   config: Config
   db: Db
   comfy: ComfyClient | null
   events: EventEmitter
+  /** 数据导入热切换用;测试/无 GPU 场景可为 null */
+  executor?: { pause(): Promise<void>; resume(db: Db): void } | null
 }
 
 export function createApp(deps: AppDeps) {
@@ -34,6 +37,7 @@ export function createApp(deps: AppDeps) {
   app.get('/api/health', async (c) =>
     c.json({ ok: true, comfy: deps.comfy ? await deps.comfy.isUp() : false }),
   )
+  app.route('/api', backupRoutes(deps))
   app.route('/api/comfy', comfyRoutes(deps))
   app.route('/api/templates', templateRoutes(deps))
   app.route('/api/events', eventRoutes(deps))
