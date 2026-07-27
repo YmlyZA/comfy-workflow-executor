@@ -13,6 +13,7 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { EnumValueSelect, optionsErrorText } from '@/components/enum-value-select'
 import { ImageMultiPick } from '@/components/image-multi-pick'
+import { TextValueControl } from '@/components/text-value-control'
 import { ImageValueControl } from '@/components/image-value-control'
 import { useInputOptions } from '@/hooks/use-input-options'
 import type { TemplateDto } from '@/pages/templates'
@@ -100,6 +101,13 @@ export function MatrixEntry({
                   <ImageValueControl
                     value={String(shared[p.key] ?? '')}
                     placeholder={String(p.default ?? '')}
+                    onChange={(v) => setShared((prev) => ({ ...prev, [p.key]: v }))}
+                  />
+                ) : p.type === 'text' ? (
+                  <TextValueControl
+                    paramKey={p.key}
+                    placeholder={String(p.default ?? '')}
+                    value={String(shared[p.key] ?? '')}
                     onChange={(v) => setShared((prev) => ({ ...prev, [p.key]: v }))}
                   />
                 ) : (

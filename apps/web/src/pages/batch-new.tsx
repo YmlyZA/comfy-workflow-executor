@@ -26,6 +26,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { EnumValueSelect } from '@/components/enum-value-select'
 import { ImageMultiPick } from '@/components/image-multi-pick'
 import { ImageValueControl } from '@/components/image-value-control'
+import { TextValueControl } from '@/components/text-value-control'
 import { MatrixEntry } from '@/components/matrix-entry'
 import { api } from '@/lib/api'
 import { useImageDims } from '@/hooks/use-image-dims'
@@ -282,6 +283,16 @@ function TableEntry({
                   ) : p.type === 'enum' ? (
                     <EnumValueSelect
                       param={p}
+                      value={String(row[p.key] ?? '')}
+                      onChange={(v) => {
+                        const next = rows.map((r, j) => (j === i ? { ...r, [p.key]: v } : r))
+                        update(next)
+                      }}
+                    />
+                  ) : p.type === 'text' ? (
+                    <TextValueControl
+                      paramKey={p.key}
+                      placeholder={String(p.default ?? '')}
                       value={String(row[p.key] ?? '')}
                       onChange={(v) => {
                         const next = rows.map((r, j) => (j === i ? { ...r, [p.key]: v } : r))
