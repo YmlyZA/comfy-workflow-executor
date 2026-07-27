@@ -17,7 +17,14 @@ describe('loadConfig', () => {
       dataDir: './data',
       comfyUrl: 'http://127.0.0.1:8188',
       authToken: 'dev-token',
+      inputHistoryLimit: 100,
     })
+  })
+
+  it('INPUT_HISTORY_LIMIT 非法/非正数回退 100', () => {
+    expect(loadConfig({ INPUT_HISTORY_LIMIT: '0' }).inputHistoryLimit).toBe(100)
+    expect(loadConfig({ INPUT_HISTORY_LIMIT: 'abc' }).inputHistoryLimit).toBe(100)
+    expect(loadConfig({ INPUT_HISTORY_LIMIT: '50' }).inputHistoryLimit).toBe(50)
   })
 
   it('strips trailing slash from comfy url', () => {

@@ -32,6 +32,16 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_batch ON jobs(batch_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+CREATE TABLE IF NOT EXISTS input_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  param_key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  use_count INTEGER NOT NULL DEFAULT 1,
+  last_used_at TEXT NOT NULL,
+  touch_seq INTEGER NOT NULL DEFAULT 0,
+  UNIQUE(param_key, value)
+);
+CREATE INDEX IF NOT EXISTS idx_input_history_key ON input_history(param_key, touch_seq);
 `
 
 export function createDb(path: string) {
