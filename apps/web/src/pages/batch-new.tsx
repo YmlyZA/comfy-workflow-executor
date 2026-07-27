@@ -1,4 +1,4 @@
-import { useMutation, useQueries, useQuery } from '@tanstack/react-query'
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import Papa from 'papaparse'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
@@ -71,13 +71,18 @@ export default function BatchNewPage() {
     setInitialRows(d.jobs.map((j) => j.params))
   }, [from, fromBatch.data, fromBatch.isError])
 
+  const qc = useQueryClient()
   const submit = useMutation({
     mutationFn: () =>
       api<{ id: number }>(`/templates/${templateId}/batches`, {
         method: 'POST',
         body: JSON.stringify({ name: name || `batch-${Date.now()}`, jobs }),
       }),
-    onSuccess: (b) => navigate(`/batches/${b.id}`),
+    onSuccess: (b) => {
+      // 建批会在服务端写入输入历史,失效所有 key 的历史缓存
+      void qc.invalidateQueries({ queryKey: ['input-history'] })
+      navigate(`/batches/${b.id}`)
+    },
     onError: (e) => setError(e.message),
   })
 

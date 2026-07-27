@@ -21,6 +21,12 @@ describe('loadConfig', () => {
     })
   })
 
+  it('INPUT_HISTORY_LIMIT 非法/非正数回退 100', () => {
+    expect(loadConfig({ INPUT_HISTORY_LIMIT: '0' }).inputHistoryLimit).toBe(100)
+    expect(loadConfig({ INPUT_HISTORY_LIMIT: 'abc' }).inputHistoryLimit).toBe(100)
+    expect(loadConfig({ INPUT_HISTORY_LIMIT: '50' }).inputHistoryLimit).toBe(50)
+  })
+
   it('strips trailing slash from comfy url', () => {
     expect(loadConfig({ COMFYUI_URL: 'http://gpu:8188/' }).comfyUrl).toBe('http://gpu:8188')
   })
