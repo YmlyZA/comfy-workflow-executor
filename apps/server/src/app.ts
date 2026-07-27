@@ -10,6 +10,7 @@ import { batchRoutes } from './routes/batches.js'
 import { eventRoutes } from './routes/events.js'
 import { downloadRoute, outputRoutes, uploadRoutes } from './routes/files.js'
 import { comfyRoutes } from './routes/comfy.js'
+import { thumbRoutes } from './routes/thumbs.js'
 
 export interface AppDeps {
   config: Config
@@ -36,6 +37,7 @@ export function createApp(deps: AppDeps) {
   app.route('/api/templates', templateRoutes(deps))
   app.route('/api/events', eventRoutes(deps))
   app.route('/api/uploads', uploadRoutes(deps))
+  app.route('/api/thumbs', thumbRoutes(deps))
   app.route('/api/outputs', outputRoutes(deps))
   app.route('/api/batches', downloadRoute(deps))
   app.route('/api/batches', batchRoutes(deps))
