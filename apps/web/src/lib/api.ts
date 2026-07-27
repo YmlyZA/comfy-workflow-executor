@@ -46,6 +46,10 @@ export function thumbUrl(source: 'uploads' | 'comfy', name: string): string {
   return `/api/thumbs?source=${source}&name=${encodeURIComponent(name)}&token=${encodeURIComponent(getToken())}`
 }
 
+export function promptsExportUrl(): string {
+  return `/api/prompts/export?token=${encodeURIComponent(getToken())}`
+}
+
 export function backupExportUrl(): string {
   return `/api/export?token=${encodeURIComponent(getToken())}`
 }

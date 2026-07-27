@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Textarea } from '@/components/ui/textarea'
+import { PromptCompleteTextarea } from '@/components/prompt-complete'
 import { EnumValueSelect, optionsErrorText } from '@/components/enum-value-select'
 import { ImageMultiPick } from '@/components/image-multi-pick'
 import { TextValueControl } from '@/components/text-value-control'
@@ -243,11 +243,11 @@ function ValueList({
       {values.map((v, i) => (
         <div key={i} className="flex items-start gap-2">
           {multiline ? (
-            <Textarea
+            <PromptCompleteTextarea
               rows={2}
               className="field-sizing-content min-h-0"
               value={v}
-              onChange={(e) => setAt(i, e.target.value)}
+              onChange={(nv) => setAt(i, nv)}
             />
           ) : (
             <Input className="h-8 w-40" value={v} onChange={(e) => setAt(i, e.target.value)} />

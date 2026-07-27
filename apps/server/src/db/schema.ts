@@ -45,6 +45,14 @@ export const inputHistory = sqliteTable('input_history', {
   touchSeq: integer('touch_seq').notNull().default(0),
 })
 
+export const prompts = sqliteTable('prompts', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  key: text('key').notNull().unique(),
+  content: text('content').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
 export type Template = typeof templates.$inferSelect
 export type Batch = typeof batches.$inferSelect
 export type Job = typeof jobs.$inferSelect
+export type Prompt = typeof prompts.$inferSelect

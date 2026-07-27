@@ -42,6 +42,12 @@ CREATE TABLE IF NOT EXISTS input_history (
   UNIQUE(param_key, value)
 );
 CREATE INDEX IF NOT EXISTS idx_input_history_key ON input_history(param_key, touch_seq);
+CREATE TABLE IF NOT EXISTS prompts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  key TEXT NOT NULL UNIQUE,
+  content TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 `
 
 export function createDb(path: string) {

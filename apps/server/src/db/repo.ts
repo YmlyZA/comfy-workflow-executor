@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gt, inArray, lt, sql } from 'drizzle-orm'
 import type { CreateBatchInput, CreateTemplateInput, OutputFile, ParamValues } from '@cwe/shared'
 import type { Db } from './index.js'
-import { batches, inputHistory, jobs, templates, type Batch, type Job, type Template } from './schema.js'
+import { batches, inputHistory, jobs, prompts, templates, type Batch, type Job, type Prompt, type Template } from './schema.js'
 
 const now = () => new Date().toISOString()
 
@@ -327,4 +327,76 @@ export function deleteInputHistory(db: Db, key: string, value: string): void {
   db.delete(inputHistory)
     .where(and(eq(inputHistory.paramKey, key), eq(inputHistory.value, value)))
     .run()
+}
+
+// -- prompts --
+
+function isUniqueViolation(err: unknown): boolean {
+  return (err as { code?: string }).code === 'SQLITE_CONSTRAINT_UNIQUE'
+}
+
+export function listPrompts(db: Db): Prompt[] {
+  return db.select().from(prompts).orderBy(asc(prompts.key)).all()
+}
+
+export function createPrompt(db: Db, key: string, content: string): Prompt | 'conflict' {
+  try {
+    return db
+      .insert(prompts)
+      .values({ key, content, updatedAt: new Date().toISOString() })
+      .returning()
+      .get()
+  } catch (err) {
+    if (isUniqueViolation(err)) return 'conflict'
+    throw err
+  }
+}
+
+export function updatePrompt(
+  db: Db,
+  id: number,
+  patch: { key?: string; content?: string },
+): Prompt | 'not-found' | 'conflict' {
+  const existing = db.select().from(prompts).where(eq(prompts.id, id)).get()
+  if (!existing) return 'not-found'
+  try {
+    return db
+      .update(prompts)
+      .set({ ...patch, updatedAt: new Date().toISOString() })
+      .where(eq(prompts.id, id))
+      .returning()
+      .get()
+  } catch (err) {
+    if (isUniqueViolation(err)) return 'conflict'
+    throw err
+  }
+}
+
+export function deletePrompt(db: Db, id: number): void {
+  db.delete(prompts).where(eq(prompts.id, id)).run()
+}
+
+export function importPrompts(
+  db: Db,
+  items: Array<{ key: string; content: string }>,
+): { created: number; updated: number } {
+  return db.transaction((tx) => {
+    let created = 0
+    let updated = 0
+    const now = new Date().toISOString()
+    for (const item of items) {
+      const existing = tx.select().from(prompts).where(eq(prompts.key, item.key)).get()
+      if (existing) {
+        tx.update(prompts)
+          .set({ content: item.content, updatedAt: now })
+          .where(eq(prompts.id, existing.id))
+          .run()
+        updated++
+      } else {
+        tx.insert(prompts).values({ key: item.key, content: item.content, updatedAt: now }).run()
+        created++
+      }
+    }
+    return { created, updated }
+  })
 }

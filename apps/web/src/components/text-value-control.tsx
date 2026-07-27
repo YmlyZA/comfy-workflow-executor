@@ -8,7 +8,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Input } from '@/components/ui/input'
+import { PromptCompleteInput } from '@/components/prompt-complete'
 import { api } from '@/lib/api'
 
 /** text 参数单值控件:手填 + 历史下拉(回填/单条删除);历史由服务端建批时自动记录 */
@@ -42,12 +42,7 @@ export function TextValueControl({
   const values = history.data?.values ?? []
   return (
     <div className="flex items-center gap-1">
-      <Input
-        className="h-8"
-        placeholder={placeholder}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      />
+      <PromptCompleteInput className="h-8" placeholder={placeholder} value={value} onChange={onChange} />
       <DropdownMenu open={open} onOpenChange={setOpen}>
         <DropdownMenuTrigger asChild>
           <Button size="sm" variant="outline" className="h-8 px-2" title="输入历史">
