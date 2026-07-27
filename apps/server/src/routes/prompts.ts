@@ -12,6 +12,9 @@ const contentSchema = z.string().refine((s) => s.trim() !== '', 'content 不能�
 
 const createSchema = z.object({ key: keySchema, content: contentSchema })
 const updateSchema = z.object({ key: keySchema.optional(), content: contentSchema.optional() })
+const importSchema = z.object({
+  prompts: z.array(z.object({ key: keySchema, content: contentSchema })),
+})
 
 export function promptRoutes(deps: AppDeps) {
   const app = new Hono()
@@ -23,6 +26,18 @@ export function promptRoutes(deps: AppDeps) {
     const row = repo.createPrompt(deps.db, body.key, body.content)
     if (row === 'conflict') return c.json({ error: 'key 已存在' }, 409)
     return c.json(row, 201)
+  })
+
+  app.get('/export', (c) => {
+    const rows = repo.listPrompts(deps.db)
+    const date = new Date().toISOString().slice(0, 10)
+    c.header('Content-Disposition', `attachment; filename="cwe-prompts-${date}.json"`)
+    return c.json({ version: 1, prompts: rows.map((p) => ({ key: p.key, content: p.content })) })
+  })
+
+  app.post('/import', async (c) => {
+    const body = importSchema.parse(await c.req.json())
+    return c.json(repo.importPrompts(deps.db, body.prompts))
   })
 
   app.put('/:id', async (c) => {

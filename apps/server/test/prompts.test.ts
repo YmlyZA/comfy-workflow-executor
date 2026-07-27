@@ -107,3 +107,54 @@ describe('prompts CRUD', () => {
     expect(missing.status).toBe(404)
   })
 })
+
+describe('prompts 导入导出', () => {
+  it('export 返回全量与固定格式,带下载头', async () => {
+    await post('', { key: 'b', content: '2' })
+    await post('', { key: 'a', content: '1' })
+    const res = await app.request('/api/prompts/export', { headers: H })
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-disposition')).toContain('cwe-prompts-')
+    expect(await res.json()).toEqual({
+      version: 1,
+      prompts: [
+        { key: 'a', content: '1' },
+        { key: 'b', content: '2' },
+      ],
+    })
+  })
+
+  it('import 按 key upsert 并计数', async () => {
+    await post('', { key: 'a', content: 'old' })
+    const res = await post('/import', {
+      version: 1,
+      prompts: [
+        { key: 'a', content: 'new' },
+        { key: 'c', content: '3' },
+      ],
+    })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ created: 1, updated: 1 })
+    const exp = await app.request('/api/prompts/export', { headers: H })
+    expect(((await exp.json()) as { prompts: Array<{ key: string; content: string }> }).prompts).toEqual([
+      { key: 'a', content: 'new' },
+      { key: 'c', content: '3' },
+    ])
+  })
+
+  it('import 非法格式整体拒绝,库不变', async () => {
+    await post('', { key: 'keep', content: 'x' })
+    const bads = [
+      {},
+      { prompts: 'nope' },
+      { prompts: [{ key: 'ok' }] },
+      { prompts: [{ content: 'x' }] },
+      { prompts: [{ key: 'bad key', content: 'x' }] },
+      { prompts: [{ key: 'ok', content: '' }] },
+    ]
+    for (const bad of bads) {
+      expect((await post('/import', bad)).status).toBe(400)
+    }
+    expect(await listKeys()).toEqual(['keep'])
+  })
+})

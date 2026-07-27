@@ -375,3 +375,28 @@ export function updatePrompt(
 export function deletePrompt(db: Db, id: number): void {
   db.delete(prompts).where(eq(prompts.id, id)).run()
 }
+
+export function importPrompts(
+  db: Db,
+  items: Array<{ key: string; content: string }>,
+): { created: number; updated: number } {
+  return db.transaction((tx) => {
+    let created = 0
+    let updated = 0
+    const now = new Date().toISOString()
+    for (const item of items) {
+      const existing = tx.select().from(prompts).where(eq(prompts.key, item.key)).get()
+      if (existing) {
+        tx.update(prompts)
+          .set({ content: item.content, updatedAt: now })
+          .where(eq(prompts.id, existing.id))
+          .run()
+        updated++
+      } else {
+        tx.insert(prompts).values({ key: item.key, content: item.content, updatedAt: now }).run()
+        created++
+      }
+    }
+    return { created, updated }
+  })
+}
