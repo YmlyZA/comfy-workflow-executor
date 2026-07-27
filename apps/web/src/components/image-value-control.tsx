@@ -11,10 +11,10 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
-import { FileThumb } from '@/components/image-multi-pick'
+import { FileThumb } from '@/components/file-thumb'
 import { useComfyInputFiles } from '@/hooks/use-comfy-input-files'
 import { useUploadFiles } from '@/hooks/use-upload-files'
-import { api, comfyInputFileUrl, uploadFileUrl } from '@/lib/api'
+import { api, comfyInputFileUrl, thumbUrl, uploadFileUrl } from '@/lib/api'
 
 /** image 参数单值控件:手填 + 双来源下拉 + 本机上传 */
 export function ImageValueControl({
@@ -72,7 +72,7 @@ export function ImageValueControl({
             <DropdownMenuLabel>服务端已上传</DropdownMenuLabel>
             {(uploads.data?.files ?? []).map((f) => (
               <DropdownMenuItem key={`up-${f}`} onSelect={() => onChange(f)}>
-                <FileThumb src={uploadFileUrl(f)} />
+                <FileThumb src={thumbUrl('uploads', f)} fallback={uploadFileUrl(f)} />
                 <span className="truncate">{f}</span>
               </DropdownMenuItem>
             ))}
@@ -85,7 +85,7 @@ export function ImageValueControl({
                 <DropdownMenuLabel>GPU 主机已有</DropdownMenuLabel>
                 {(gpuFiles.data?.files ?? []).map((f) => (
                   <DropdownMenuItem key={`gpu-${f}`} onSelect={() => onChange(f)}>
-                    <FileThumb src={comfyInputFileUrl(f)} />
+                    <FileThumb src={thumbUrl('comfy', f)} fallback={comfyInputFileUrl(f)} />
                     <span className="truncate">{f}</span>
                   </DropdownMenuItem>
                 ))}

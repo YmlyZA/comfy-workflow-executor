@@ -41,3 +41,7 @@ export function uploadFileUrl(name: string): string {
 export function comfyInputFileUrl(name: string): string {
   return `/api/comfy/input-image?name=${encodeURIComponent(name)}&token=${encodeURIComponent(getToken())}`
 }
+
+export function thumbUrl(source: 'uploads' | 'comfy', name: string): string {
+  return `/api/thumbs?source=${source}&name=${encodeURIComponent(name)}&token=${encodeURIComponent(getToken())}`
+}

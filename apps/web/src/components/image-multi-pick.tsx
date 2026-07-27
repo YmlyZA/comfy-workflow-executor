@@ -1,27 +1,10 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { FileThumb } from '@/components/file-thumb'
 import { useComfyInputFiles } from '@/hooks/use-comfy-input-files'
 import { useUploadFiles } from '@/hooks/use-upload-files'
-import { api, comfyInputFileUrl, uploadFileUrl } from '@/lib/api'
-
-/** 缩略图:加载失败隐藏但保位,不破版式 */
-export function FileThumb({ src }: { src: string }) {
-  const [hidden, setHidden] = useState(false)
-  return (
-    <span className="size-8 shrink-0 overflow-hidden rounded">
-      {!hidden && (
-        <img
-          src={src}
-          loading="lazy"
-          alt=""
-          className="size-8 object-cover"
-          onError={() => setHidden(true)}
-        />
-      )}
-    </span>
-  )
-}
+import { api, comfyInputFileUrl, thumbUrl, uploadFileUrl } from '@/lib/api'
 
 /** image 多选:双来源勾选 + 本机上传(成功自动选中);value 顺序即选中顺序 */
 export function ImageMultiPick({
@@ -65,20 +48,20 @@ export function ImageMultiPick({
     }
   }
 
-  const groups: Array<[string, string[], (f: string) => string]> = [
-    ['服务端已上传', uploads.data?.files ?? [], uploadFileUrl],
+  const groups: Array<['uploads' | 'comfy', string, string[], (f: string) => string]> = [
+    ['uploads', '服务端已上传', uploads.data?.files ?? [], uploadFileUrl],
   ]
   if (!gpuFiles.isError && !gpuFiles.isLoading) {
-    groups.push(['GPU 主机已有', gpuFiles.data?.files ?? [], comfyInputFileUrl])
+    groups.push(['comfy', 'GPU 主机已有', gpuFiles.data?.files ?? [], comfyInputFileUrl])
   }
-  const listed = new Set(groups.flatMap(([, files]) => files))
+  const listed = new Set(groups.flatMap(([, , files]) => files))
   // 已选但不在任何列表(如 GPU 离线后其文件从列表消失):仍渲染,保证能取消勾选
   const orphans = value.filter((v) => !listed.has(v))
 
   return (
     <div className="space-y-2">
       <div className="max-h-56 space-y-1 overflow-y-auto rounded-md border p-2">
-        {groups.map(([label, files, urlOf]) => (
+        {groups.map(([source, label, files, urlOf]) => (
           <div key={label}>
             <p className="text-xs font-medium text-muted-foreground">{label}</p>
             {files.map((f) => (
@@ -88,7 +71,7 @@ export function ImageMultiPick({
                   checked={chosen.has(f)}
                   onChange={(e) => toggle(f, e.target.checked)}
                 />
-                <FileThumb src={urlOf(f)} />
+                <FileThumb src={thumbUrl(source, f)} fallback={urlOf(f)} />
                 <span className="truncate" title={f}>
                   {f}
                 </span>
@@ -103,7 +86,7 @@ export function ImageMultiPick({
             {orphans.map((f) => (
               <label key={f} className="flex items-center gap-2 text-sm">
                 <input type="checkbox" checked onChange={() => toggle(f, false)} />
-                <FileThumb src={uploadFileUrl(f)} />
+                <FileThumb src={thumbUrl('uploads', f)} fallback={uploadFileUrl(f)} />
                 <span className="truncate" title={f}>
                   {f}
                 </span>
