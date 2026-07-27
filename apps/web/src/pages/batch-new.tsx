@@ -530,6 +530,13 @@ function ImagesEntry({
                   value={String(shared[p.key] ?? '')}
                   onChange={(v) => setShared((prev) => ({ ...prev, [p.key]: v }))}
                 />
+              ) : p.type === 'text' ? (
+                <TextValueControl
+                  paramKey={p.key}
+                  placeholder={String(p.default ?? '')}
+                  value={String(shared[p.key] ?? '')}
+                  onChange={(v) => setShared((prev) => ({ ...prev, [p.key]: v }))}
+                />
               ) : (
                 <Input
                   placeholder={String(p.default ?? '')}
