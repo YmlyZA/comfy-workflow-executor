@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { fetchPrompts, type PromptRow } from '@/lib/prompts'
@@ -15,11 +15,22 @@ function deriveCapture(value: string, caret: number): { start: number; frag: str
   return { start: dollar, frag }
 }
 
-function usePromptComplete(value: string, onChange: (v: string) => void) {
+function usePromptComplete<T extends HTMLInputElement | HTMLTextAreaElement>(
+  value: string,
+  onChange: (v: string) => void,
+) {
+  const elRef = useRef<T>(null)
   const [caret, setCaret] = useState<number | null>(null)
-  const [closed, setClosed] = useState(false)
+  // Esc 关闭的 token 起点;当当前捕获态的 start 与此相同时保持关闭,直到出现新的 $(不同 start)
+  const [dismissedStart, setDismissedStart] = useState<number | null>(null)
+  // 失焦关闭;下一次 input 事件即恢复(与 dismissedStart 的“持久关闭”语义不同)
+  const [blurClosed, setBlurClosed] = useState(false)
   const [hi, setHi] = useState(0)
-  const capture = !closed && caret != null ? deriveCapture(value, caret) : null
+  // 展开后待写回的光标位置;value 落地(受控更新)后在 effect 里生效
+  const [pendingCaret, setPendingCaret] = useState<number | null>(null)
+  const rawCapture = caret != null ? deriveCapture(value, caret) : null
+  const capture =
+    rawCapture && !blurClosed && rawCapture.start !== dismissedStart ? rawCapture : null
   const open = capture != null
   const query = useQuery({
     queryKey: ['prompts'],
@@ -34,24 +45,42 @@ function usePromptComplete(value: string, onChange: (v: string) => void) {
     : []
   const highlighted = Math.min(hi, Math.max(matches.length - 1, 0))
 
+  // 受控组件的 value 更新落地后,把光标精确放到插入内容末尾(而不是浏览器默认的整段末尾)
+  useLayoutEffect(() => {
+    if (pendingCaret == null) return
+    const el = elRef.current
+    if (el) {
+      el.focus()
+      el.setSelectionRange(pendingCaret, pendingCaret)
+    }
+    setCaret(pendingCaret)
+    setPendingCaret(null)
+  }, [value, pendingCaret])
+
   function handleChange(e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) {
     setCaret(e.target.selectionStart)
-    setClosed(false)
+    setBlurClosed(false)
     setHi(0)
     onChange(e.target.value)
   }
 
   function pick(p: PromptRow) {
     if (!capture || caret == null) return
-    onChange(value.slice(0, capture.start) + p.content + value.slice(caret))
-    setClosed(true)
+    const newValue = value.slice(0, capture.start) + p.content + value.slice(caret)
+    const newCaret = capture.start + p.content.length
+    // 插入内容里若恰好含 $,预先把它标记为“已关闭”,避免选中后立刻又弹出;
+    // 等用户真正敲出新的 $(不同 start)才会重新打开
+    const nextCapture = deriveCapture(newValue, newCaret)
+    onChange(newValue)
+    setDismissedStart(nextCapture ? nextCapture.start : null)
+    setPendingCaret(newCaret)
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
-    if (!open) return
+    if (!capture) return
     if (e.key === 'Escape') {
       e.preventDefault()
-      setClosed(true)
+      setDismissedStart(capture.start)
       return
     }
     if (matches.length === 0) return
@@ -90,7 +119,13 @@ function usePromptComplete(value: string, onChange: (v: string) => void) {
     </div>
   ) : null
 
-  return { handleChange, handleKeyDown, handleBlur: () => setClosed(true), dropdown }
+  return {
+    ref: elRef,
+    handleChange,
+    handleKeyDown,
+    handleBlur: () => setBlurClosed(true),
+    dropdown,
+  }
 }
 
 /** 带 $key 补全的 text 单值输入框;onChange 收字符串 */
@@ -105,10 +140,11 @@ export function PromptCompleteInput({
   className?: string
   placeholder?: string
 }) {
-  const c = usePromptComplete(value, onChange)
+  const c = usePromptComplete<HTMLInputElement>(value, onChange)
   return (
     <div className="relative flex-1">
       <Input
+        ref={c.ref}
         className={className}
         placeholder={placeholder}
         value={value}
@@ -133,10 +169,11 @@ export function PromptCompleteTextarea({
   className?: string
   rows?: number
 }) {
-  const c = usePromptComplete(value, onChange)
+  const c = usePromptComplete<HTMLTextAreaElement>(value, onChange)
   return (
     <div className="relative flex-1">
       <Textarea
+        ref={c.ref}
         className={className}
         rows={rows}
         value={value}
