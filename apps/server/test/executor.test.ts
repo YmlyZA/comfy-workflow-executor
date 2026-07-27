@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ParamDef, ParamValues } from '@cwe/shared'
 import { createDb, type Db } from '../src/db/index.js'
 import * as repo from '../src/db/repo.js'
@@ -248,5 +248,24 @@ describe('executor', () => {
     await makeExecutor().runPendingOnce()
     const out = repo.getBatchDetail(db, b.id)!.jobs[0]!.outputs![0]!
     expect(out.gpu).toEqual({ filename: 'out.png', subfolder: '' })
+  })
+})
+
+describe('pause/resume(数据导入热切换)', () => {
+  it('pause 等循环退出;resume 换库后跑新库任务', async () => {
+    const ex = makeExecutor()
+    ex.start()
+    await ex.pause()
+
+    const db2 = createDb(':memory:')
+    const t = repo.createTemplate(db2, { name: 'T2', comfyJson, params })
+    const b = repo.createBatch(db2, t.id, { name: 'B2', jobs: [{ prompt: 'z' }] })
+    ex.resume(db2)
+    await vi.waitFor(() => {
+      expect(repo.getBatchDetail(db2, b.id)!.jobs[0]!.status).toBe('succeeded')
+    })
+    ex.stop()
+    // 旧库无任何任务被创建/执行
+    expect(repo.listBatches(db)).toHaveLength(0)
   })
 })

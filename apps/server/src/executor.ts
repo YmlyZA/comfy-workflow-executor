@@ -20,7 +20,7 @@ export interface ExecutorDeps {
 }
 
 export class Executor {
-  private readonly db: Db
+  private db: Db
   private readonly comfy: ComfyClient
   private readonly events: EventEmitter
   private readonly dataDir: string
@@ -29,6 +29,7 @@ export class Executor {
   private running = false
   private currentJobId: number | null = null
   private disconnectWs: (() => void) | null = null
+  private loopPromise: Promise<void> | null = null
   /** 本地 stored 名 → GPU 侧返回名;进程内去重,重启后靠 overwrite 幂等重传 */
   private readonly gpuUploads = new Map<string, string>()
 
@@ -52,12 +53,26 @@ export class Executor {
         })
       }
     })
-    void this.loop()
+    this.loopPromise = this.loop()
   }
 
   stop(): void {
     this.running = false
     this.disconnectWs?.()
+  }
+
+  /** 停下并等当前任务/轮询收尾(数据导入热切换用) */
+  async pause(): Promise<void> {
+    this.stop()
+    await this.loopPromise
+    this.loopPromise = null
+  }
+
+  /** 换库后重启(数据导入热切换用);GPU 上传映射清空,靠 overwrite 幂等重传 */
+  resume(db: Db): void {
+    this.db = db
+    this.gpuUploads.clear()
+    this.start()
   }
 
   private async loop(): Promise<void> {
