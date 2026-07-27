@@ -110,20 +110,62 @@ describe('POST /api/import', () => {
     expect(row.name).toBe('OLD')
   })
 
-  it('导入时按序调用 executor pause→resume', async () => {
+  it('导入时按序调用 executor pause→resume,resume 收到重开后的新 db', async () => {
     const calls: string[] = []
+    let resumedDb: unknown = null
+    const oldDb = deps.db
     deps.executor = {
       pause: async () => {
         calls.push('pause')
       },
-      resume: () => {
+      resume: (db) => {
         calls.push('resume')
+        resumedDb = db
       },
     }
     const zip = await buildBackupZip('X')
     const res = await app.request('/api/import', { method: 'POST', headers: HZ, body: new Uint8Array(zip) })
     expect(res.status).toBe(200)
     expect(calls).toEqual(['pause', 'resume'])
+    expect(resumedDb).toBe(deps.db)
+    expect(resumedDb).not.toBe(oldDb)
+  })
+
+  it('合法 sqlite 但 createDb 会炸的库(templates 是视图) → 400,服务照常', async () => {
+    repo.createTemplate(deps.db, { name: 'KEEP', comfyJson: {}, params: [] })
+    // 构造一个 sqlite 文件:templates 名字被视图占用,CREATE TABLE IF NOT EXISTS 仍会报错
+    const evilDbPath = join(mkdtempSync(join(tmpdir(), 'cwe-evil-db-')), 'db.sqlite')
+    const evil = new Database(evilDbPath)
+    evil.exec('CREATE VIEW templates AS SELECT 1 AS x')
+    evil.close()
+    const archive = archiver('zip')
+    const chunks: Buffer[] = []
+    archive.on('data', (d: Buffer) => chunks.push(d))
+    archive.file(evilDbPath, { name: 'db.sqlite' })
+    await archive.finalize()
+    const res = await app.request('/api/import', {
+      method: 'POST',
+      headers: HZ,
+      body: new Uint8Array(Buffer.concat(chunks)),
+    })
+    expect(res.status).toBe(400)
+    // 旧数据在线且可用(没有进入热切换)
+    expect(repo.listTemplates(deps.db).map((t) => t.name)).toEqual(['KEEP'])
+    const list = await app.request('/api/templates', { headers: H })
+    expect(list.status).toBe(200)
+  })
+
+  it('400 路径不留 .import-* 临时残留', async () => {
+    await app.request('/api/import', {
+      method: 'POST',
+      headers: HZ,
+      body: new Uint8Array(Buffer.from('not a zip at all')),
+    })
+    const parent = join(dataDir, '..')
+    const leftovers = readdirSync(parent).filter((n) =>
+      n.startsWith(`${basename(dataDir)}.import-`),
+    )
+    expect(leftovers).toEqual([])
   })
 
   it('非 zip / 缺 db.sqlite → 400,原数据不动', async () => {

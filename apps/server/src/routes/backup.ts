@@ -4,7 +4,6 @@ import { join, resolve } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import archiver from 'archiver'
-import Database from 'better-sqlite3'
 import { Hono } from 'hono'
 import type { AppDeps } from '../app.js'
 import { createDb } from '../db/index.js'
@@ -17,7 +16,11 @@ export function backupRoutes(deps: AppDeps) {
     // WAL 合回主库,zip 里的 db.sqlite 才含最近写入
     deps.db.$client.pragma('wal_checkpoint(TRUNCATE)')
     const archive = archiver('zip')
-    archive.on('error', (err) => console.error('export zip error', err))
+    archive.on('error', (err) => {
+      // 中途读文件失败时掐断流:让下载明确失败,而不是 200 + 静默截断的坏包
+      console.error('export zip error', err)
+      archive.destroy()
+    })
     archive.on('warning', (err) => console.error('export zip warning', err))
     archive.file(join(deps.config.dataDir, 'db.sqlite'), { name: 'db.sqlite' })
     for (const sub of ['uploads', 'outputs'] as const) {
@@ -54,13 +57,18 @@ export function backupRoutes(deps: AppDeps) {
         )
       }
 
+      // 外来 wal/shm 不可信(可能与主库不配套,触发错误的 WAL 恢复),丢弃;导出本就不含它们
+      await rm(join(tmpDir, 'db.sqlite-wal'), { force: true })
+      await rm(join(tmpDir, 'db.sqlite-shm'), { force: true })
+
+      // 校验:趁旧数据还在线,用真实 createDb 试开候选库(连 DDL/迁移一起演练),
+      // 失败就干净地 400——避免切换后才在恢复段炸出半死状态
       const dbPath = join(tmpDir, 'db.sqlite')
       let valid = existsSync(dbPath)
       if (valid) {
         try {
-          const check = new Database(dbPath, { readonly: true })
-          check.prepare('SELECT name FROM sqlite_master LIMIT 1').get()
-          check.close()
+          const probe = createDb(dbPath)
+          probe.$client.close()
         } catch {
           valid = false
         }
@@ -76,16 +84,25 @@ export function backupRoutes(deps: AppDeps) {
         try {
           await rename(tmpDir, dataDir)
         } catch (err) {
-          await rename(bak, dataDir) // 回滚:旧目录归位
+          try {
+            await rename(bak, dataDir) // 回滚:旧目录归位
+          } catch (rollbackErr) {
+            console.error(`导入回滚失败:旧数据完好保存在 ${bak},当前将运行在空库上`, rollbackErr)
+          }
           throw err
         }
       } finally {
-        // 无论换成新旧哪套目录,都要重开 db 恢复服务
-        await mkdir(join(dataDir, 'uploads'), { recursive: true })
-        await mkdir(join(dataDir, 'outputs'), { recursive: true })
-        const reopened = createDb(join(dataDir, 'db.sqlite'))
-        deps.db = reopened
-        deps.executor?.resume(reopened)
+        // 无论换成新旧哪套目录,都要重开 db 恢复服务;这段再抛会把 deps.db 留在已关闭
+        // 状态、executor 永久暂停,必须自兜底
+        try {
+          await mkdir(join(dataDir, 'uploads'), { recursive: true })
+          await mkdir(join(dataDir, 'outputs'), { recursive: true })
+          const reopened = createDb(join(dataDir, 'db.sqlite'))
+          deps.db = reopened
+          deps.executor?.resume(reopened)
+        } catch (reopenErr) {
+          console.error('导入后重开数据库失败,需要重启服务', reopenErr)
+        }
       }
       return c.json({ ok: true })
     } finally {
