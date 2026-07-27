@@ -16,7 +16,9 @@ mkdirSync(join(config.dataDir, 'outputs'), { recursive: true })
 const db = createDb(join(config.dataDir, 'db.sqlite'))
 const events = new EventEmitter()
 const comfy = createComfyClient(config.comfyUrl)
-const app = createApp({ config, db, comfy, events })
+// deps 对象与 app/executor 共享:数据导入热切换靠替换 deps.db/暂停 executor
+const deps = { config, db, comfy, events, executor: null as Executor | null }
+const app = createApp(deps)
 
 if (existsSync('./public')) {
   app.use('/*', serveStatic({ root: './public' }))
@@ -24,6 +26,7 @@ if (existsSync('./public')) {
 }
 
 const executor = new Executor({ db, comfy, events, dataDir: config.dataDir })
+deps.executor = executor
 executor.start()
 
 serve({ fetch: app.fetch, port: config.port }, (info) => {

@@ -1,8 +1,9 @@
 import { EventEmitter } from 'node:events'
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
+import archiver from 'archiver'
 import Database from 'better-sqlite3'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createApp, type AppDeps } from '../src/app.js'
@@ -72,5 +73,110 @@ describe('GET /api/export', () => {
     const row = check.prepare('SELECT name FROM templates').get() as { name: string }
     check.close()
     expect(row.name).toBe('RECENT')
+  })
+})
+
+/** 用一套独立 dataDir + app 造出真实导出包 */
+async function buildBackupZip(templateName: string): Promise<Buffer> {
+  const srcDir = mkdtempSync(join(tmpdir(), 'cwe-src-'))
+  const { app: srcApp, deps: srcDeps } = makeApp(srcDir)
+  repo.createTemplate(srcDeps.db, { name: templateName, comfyJson: {}, params: [] })
+  writeFileSync(join(srcDir, 'uploads', 'from-zip.png'), 'img')
+  const res = await srcApp.request('/api/export', { headers: H })
+  return Buffer.from(await res.arrayBuffer())
+}
+
+const HZ = { Authorization: 'Bearer secret', 'Content-Type': 'application/zip' }
+
+describe('POST /api/import', () => {
+  it('整体替换:新库数据生效,uploads 落位,bak 目录保留旧库', async () => {
+    repo.createTemplate(deps.db, { name: 'OLD', comfyJson: {}, params: [] })
+    const zip = await buildBackupZip('FROM-ZIP')
+    const res = await app.request('/api/import', { method: 'POST', headers: HZ, body: new Uint8Array(zip) })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true })
+
+    const list = repo.listTemplates(deps.db).map((t) => t.name)
+    expect(list).toEqual(['FROM-ZIP'])
+    expect(existsSync(join(dataDir, 'uploads', 'from-zip.png'))).toBe(true)
+    expect(existsSync(join(dataDir, 'outputs'))).toBe(true)
+
+    const parent = join(dataDir, '..')
+    const bak = readdirSync(parent).find((n) => n.startsWith(`${basename(dataDir)}.bak-`))
+    expect(bak).toBeDefined()
+    const old = new Database(join(parent, bak!, 'db.sqlite'), { readonly: true })
+    const row = old.prepare('SELECT name FROM templates').get() as { name: string }
+    old.close()
+    expect(row.name).toBe('OLD')
+  })
+
+  it('导入时按序调用 executor pause→resume', async () => {
+    const calls: string[] = []
+    deps.executor = {
+      pause: async () => {
+        calls.push('pause')
+      },
+      resume: () => {
+        calls.push('resume')
+      },
+    }
+    const zip = await buildBackupZip('X')
+    const res = await app.request('/api/import', { method: 'POST', headers: HZ, body: new Uint8Array(zip) })
+    expect(res.status).toBe(200)
+    expect(calls).toEqual(['pause', 'resume'])
+  })
+
+  it('非 zip / 缺 db.sqlite → 400,原数据不动', async () => {
+    repo.createTemplate(deps.db, { name: 'KEEP', comfyJson: {}, params: [] })
+
+    const notZip = await app.request('/api/import', {
+      method: 'POST',
+      headers: HZ,
+      body: new Uint8Array(Buffer.from('not a zip at all')),
+    })
+    expect(notZip.status).toBe(400)
+
+    // 合法 zip 但没有 db.sqlite
+    const archive = archiver('zip')
+    const chunks: Buffer[] = []
+    archive.on('data', (d: Buffer) => chunks.push(d))
+    archive.append('x', { name: 'random.txt' })
+    await archive.finalize()
+    const noDb = await app.request('/api/import', {
+      method: 'POST',
+      headers: HZ,
+      body: new Uint8Array(Buffer.concat(chunks)),
+    })
+    expect(noDb.status).toBe(400)
+    expect(((await noDb.json()) as { error: string }).error).toBe('zip 内缺少有效的 db.sqlite')
+
+    expect(repo.listTemplates(deps.db).map((t) => t.name)).toEqual(['KEEP'])
+  })
+
+  it('并发导入 409', async () => {
+    const zip = await buildBackupZip('Y')
+    let release!: () => void
+    const gate = new Promise<void>((r) => {
+      release = r
+    })
+    const slow = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        controller.enqueue(zip.subarray(0, 10))
+        await gate
+        controller.enqueue(zip.subarray(10))
+        controller.close()
+      },
+    })
+    const p1 = app.request('/api/import', {
+      method: 'POST',
+      headers: HZ,
+      body: slow,
+      duplex: 'half',
+    } as RequestInit)
+    await new Promise((r) => setTimeout(r, 30))
+    const r2 = await app.request('/api/import', { method: 'POST', headers: HZ, body: new Uint8Array(zip) })
+    expect(r2.status).toBe(409)
+    release()
+    expect((await p1).status).toBe(200)
   })
 })
