@@ -47,9 +47,17 @@ export function templateRoutes(deps: AppDeps) {
 
   app.post('/:id/batches', async (c) => {
     const id = Number(c.req.param('id'))
-    if (!repo.getTemplate(deps.db, id)) return c.json({ error: 'template not found' }, 404)
+    const template = repo.getTemplate(deps.db, id)
+    if (!template) return c.json({ error: 'template not found' }, 404)
     const input = createBatchSchema.parse(await c.req.json())
     const batch = repo.createBatch(deps.db, id, input)
+    // 输入历史记录失败不影响建批
+    try {
+      const textKeys = template.params.filter((p) => p.type === 'text').map((p) => p.key)
+      repo.recordInputHistory(deps.db, textKeys, input.jobs, deps.config.inputHistoryLimit)
+    } catch (err) {
+      console.error('record input history failed', err)
+    }
     deps.events.emit('event', { type: 'batch-updated', batchId: batch.id, status: batch.status })
     return c.json(batch, 201)
   })

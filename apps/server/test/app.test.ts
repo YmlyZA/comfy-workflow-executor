@@ -17,6 +17,7 @@ describe('loadConfig', () => {
       dataDir: './data',
       comfyUrl: 'http://127.0.0.1:8188',
       authToken: 'dev-token',
+      inputHistoryLimit: 100,
     })
   })
 

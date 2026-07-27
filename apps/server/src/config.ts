@@ -3,6 +3,7 @@ export interface Config {
   dataDir: string
   comfyUrl: string
   authToken: string
+  inputHistoryLimit: number
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -16,5 +17,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     dataDir: env.DATA_DIR ?? './data',
     comfyUrl: (env.COMFYUI_URL ?? 'http://127.0.0.1:8188').replace(/\/+$/, ''),
     authToken,
+    inputHistoryLimit: (() => {
+      const n = Number(env.INPUT_HISTORY_LIMIT ?? 100)
+      return Number.isInteger(n) && n > 0 ? n : 100
+    })(),
   }
 }

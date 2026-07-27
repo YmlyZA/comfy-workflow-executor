@@ -35,6 +35,16 @@ export const jobs = sqliteTable('jobs', {
   finishedAt: text('finished_at'),
 })
 
+export const inputHistory = sqliteTable('input_history', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  paramKey: text('param_key').notNull(),
+  value: text('value').notNull(),
+  useCount: integer('use_count').notNull().default(1),
+  lastUsedAt: text('last_used_at').notNull(),
+  // 排序不用时间戳(毫秒内多批次会撞车),用全局递增触碰序号
+  touchSeq: integer('touch_seq').notNull().default(0),
+})
+
 export type Template = typeof templates.$inferSelect
 export type Batch = typeof batches.$inferSelect
 export type Job = typeof jobs.$inferSelect

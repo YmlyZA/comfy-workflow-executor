@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gt, inArray, lt, sql } from 'drizzle-orm'
-import type { CreateBatchInput, CreateTemplateInput, OutputFile } from '@cwe/shared'
+import type { CreateBatchInput, CreateTemplateInput, OutputFile, ParamValues } from '@cwe/shared'
 import type { Db } from './index.js'
-import { batches, jobs, templates, type Batch, type Job, type Template } from './schema.js'
+import { batches, inputHistory, jobs, templates, type Batch, type Job, type Template } from './schema.js'
 
 const now = () => new Date().toISOString()
 
@@ -265,4 +265,66 @@ export function deleteBatch(db: Db, id: number): 'ok' | 'not-found' | 'running' 
     tx.delete(batches).where(eq(batches.id, id)).run()
     return 'ok'
   })
+}
+
+// -- input history --
+
+/** 建批时记录 text 参数值:同批 (key,value) 去重后 upsert,再按 key 修剪到 limit */
+export function recordInputHistory(
+  db: Db,
+  textKeys: string[],
+  jobsParams: ParamValues[],
+  limit: number,
+): void {
+  if (textKeys.length === 0) return
+  const seen = new Set<string>()
+  const entries: Array<{ key: string; value: string }> = []
+  for (const params of jobsParams) {
+    for (const key of textKeys) {
+      const v = params[key]
+      if (typeof v !== 'string' || v.trim() === '') continue
+      const dedup = `${key}\u0000${v}`
+      if (seen.has(dedup)) continue
+      seen.add(dedup)
+      entries.push({ key, value: v })
+    }
+  }
+  if (entries.length === 0) return
+  db.transaction((tx) => {
+    const ts = now()
+    const maxSeq = tx.select({ m: sql<number>`coalesce(max(touch_seq), 0)` }).from(inputHistory).get()
+    let seq = maxSeq?.m ?? 0
+    for (const e of entries) {
+      seq += 1
+      tx.insert(inputHistory)
+        .values({ paramKey: e.key, value: e.value, lastUsedAt: ts, touchSeq: seq })
+        .onConflictDoUpdate({
+          target: [inputHistory.paramKey, inputHistory.value],
+          set: { useCount: sql`${inputHistory.useCount} + 1`, lastUsedAt: ts, touchSeq: seq },
+        })
+        .run()
+    }
+    for (const key of new Set(entries.map((e) => e.key))) {
+      tx.run(sql`DELETE FROM input_history WHERE param_key = ${key} AND id NOT IN (
+        SELECT id FROM input_history WHERE param_key = ${key}
+        ORDER BY touch_seq DESC LIMIT ${limit})`)
+    }
+  })
+}
+
+export function listInputHistory(db: Db, key: string, limit: number): string[] {
+  return db
+    .select({ value: inputHistory.value })
+    .from(inputHistory)
+    .where(eq(inputHistory.paramKey, key))
+    .orderBy(desc(inputHistory.touchSeq))
+    .limit(limit)
+    .all()
+    .map((r) => r.value)
+}
+
+export function deleteInputHistory(db: Db, key: string, value: string): void {
+  db.delete(inputHistory)
+    .where(and(eq(inputHistory.paramKey, key), eq(inputHistory.value, value)))
+    .run()
 }
