@@ -57,6 +57,9 @@ function PickerBody({
 }) {
   const qc = useQueryClient()
   const fileRef = useRef<HTMLInputElement>(null)
+  const gridRef = useRef<HTMLDivElement>(null)
+  const overlayRef = useRef<HTMLDivElement>(null)
+  const dragStart = useRef<{ x: number; y: number } | null>(null)
   const [draft, setDraft] = useState<string[]>(value)
   const [tab, setTab] = useState<PickSource>('uploads')
   const [filter, setFilter] = useState('')
@@ -114,6 +117,47 @@ function PickerBody({
     }
   }
 
+  function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    if (mode !== 'multi' || e.button !== 0) return
+    // 落在卡片上是点选,不启动框选
+    if ((e.target as HTMLElement).closest('[data-name]')) return
+    dragStart.current = { x: e.clientX, y: e.clientY }
+    gridRef.current?.setPointerCapture(e.pointerId)
+  }
+
+  function onPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (!dragStart.current || !overlayRef.current || !gridRef.current) return
+    const host = gridRef.current.getBoundingClientRect()
+    // 拖动过程只改 overlay 样式,不 setState
+    Object.assign(overlayRef.current.style, {
+      display: 'block',
+      left: `${Math.min(dragStart.current.x, e.clientX) - host.left}px`,
+      top: `${Math.min(dragStart.current.y, e.clientY) - host.top + gridRef.current.scrollTop}px`,
+      width: `${Math.abs(e.clientX - dragStart.current.x)}px`,
+      height: `${Math.abs(e.clientY - dragStart.current.y)}px`,
+    })
+  }
+
+  function onPointerUp(e: React.PointerEvent<HTMLDivElement>) {
+    const start = dragStart.current
+    dragStart.current = null
+    if (overlayRef.current) overlayRef.current.style.display = 'none'
+    if (!start || !gridRef.current) return
+    const x1 = Math.min(start.x, e.clientX)
+    const x2 = Math.max(start.x, e.clientX)
+    const y1 = Math.min(start.y, e.clientY)
+    const y2 = Math.max(start.y, e.clientY)
+    if (x2 - x1 < 4 && y2 - y1 < 4) return // 视为点击
+    const hit: string[] = []
+    for (const el of gridRef.current.querySelectorAll<HTMLElement>('[data-name]')) {
+      const r = el.getBoundingClientRect()
+      if (r.left < x2 && r.right > x1 && r.top < y2 && r.bottom > y1 && el.dataset.name) {
+        hit.push(el.dataset.name)
+      }
+    }
+    if (hit.length) setDraft((prev) => [...prev, ...hit.filter((n) => !prev.includes(n))])
+  }
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -150,7 +194,17 @@ function PickerBody({
         {uploading && <span className="text-xs text-muted-foreground">上传中…</span>}
         {error && <span className="text-xs text-destructive">{error}</span>}
       </div>
-      <div className="relative flex max-h-80 min-h-40 select-none flex-wrap content-start gap-2 overflow-y-auto rounded-md border p-2">
+      <div
+        ref={gridRef}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        className="relative flex max-h-80 min-h-40 select-none flex-wrap content-start gap-2 overflow-y-auto rounded-md border p-2"
+      >
+        <div
+          ref={overlayRef}
+          className="pointer-events-none absolute z-10 hidden border border-primary bg-primary/10"
+        />
         {shown.map((f) => (
           <GridCard key={f} name={f} source={tab} selected={chosen.has(f)} onPick={() => pick(f)} />
         ))}
