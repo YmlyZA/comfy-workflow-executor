@@ -158,6 +158,11 @@ function PickerBody({
     if (hit.length) setDraft((prev) => [...prev, ...hit.filter((n) => !prev.includes(n))])
   }
 
+  function onPointerCancel() {
+    dragStart.current = null
+    if (overlayRef.current) overlayRef.current.style.display = 'none'
+  }
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -199,6 +204,7 @@ function PickerBody({
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onPointerCancel={onPointerCancel}
         className="relative flex max-h-80 min-h-40 select-none flex-wrap content-start gap-2 overflow-y-auto rounded-md border p-2"
       >
         <div
