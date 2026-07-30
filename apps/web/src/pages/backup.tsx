@@ -28,13 +28,16 @@ export default function BackupPage() {
   const [msg, setMsg] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
 
-  // 导入中拦截刷新/关闭:服务端正在整体替换数据,中途离开会看不到结果(切换本身在服务端继续)
+  // 导入中拦截刷新/关闭:服务端正在整体替换数据,中途离开会看不到结果(切换本身在服务端继续)。
+  // 守卫放 ref:成功路径要在自动 reload 前同步摘掉,等 setState 触发 effect 清理来不及,
+  // 否则会被自己的守卫拦下弹出浏览器确认框
+  const unloadGuard = useRef((e: BeforeUnloadEvent) => {
+    e.preventDefault()
+    e.returnValue = ''
+  })
   useEffect(() => {
     if (!busy) return
-    const handler = (e: BeforeUnloadEvent) => {
-      e.preventDefault()
-      e.returnValue = ''
-    }
+    const handler = unloadGuard.current
     window.addEventListener('beforeunload', handler)
     return () => window.removeEventListener('beforeunload', handler)
   }, [busy])
@@ -45,6 +48,7 @@ export default function BackupPage() {
     try {
       await importBackup(file)
       setMsg('导入成功，即将刷新')
+      window.removeEventListener('beforeunload', unloadGuard.current)
       window.location.reload()
     } catch (e) {
       setMsg(`导入失败：${errMsg(e)}`)
