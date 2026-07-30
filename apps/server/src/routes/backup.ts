@@ -1,5 +1,5 @@
 import { createWriteStream, existsSync } from 'node:fs'
-import { mkdir, rename, rm } from 'node:fs/promises'
+import { mkdir, readdir, rename, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
@@ -41,8 +41,10 @@ export function backupRoutes(deps: AppDeps) {
     importing = true
     const stamp = Date.now()
     const dataDir = resolve(deps.config.dataDir)
-    const tmpZip = `${dataDir}.import-${stamp}.zip`
-    const tmpDir = `${dataDir}.import-${stamp}`
+    // 临时文件/备份都放在 dataDir 内部:dataDir 可能是 Docker volume 挂载点,
+    // 放外面会跨文件系统(rename 报 EXDEV),挂载点自身也不能被 rename(EBUSY)
+    const tmpZip = join(dataDir, `.import-${stamp}.zip`)
+    const tmpDir = join(dataDir, `.import-${stamp}`)
     try {
       const body = c.req.raw.body
       if (!body) return c.json({ error: '请求体为空' }, 400)
@@ -75,22 +77,12 @@ export function backupRoutes(deps: AppDeps) {
       }
       if (!valid) return c.json({ error: 'zip 内缺少有效的 db.sqlite' }, 400)
 
-      // 热切换:暂停执行器 → 关库 → 换目录(留 bak) → 重开 → 换引用 → 复跑
+      // 热切换:暂停执行器 → 关库 → 目录内逐项换内容(留 bak) → 重开 → 换引用 → 复跑
       await deps.executor?.pause()
       deps.db.$client.close()
-      const bak = `${dataDir}.bak-${stamp}`
+      const bak = join(dataDir, `.bak-${stamp}`)
       try {
-        await rename(dataDir, bak)
-        try {
-          await rename(tmpDir, dataDir)
-        } catch (err) {
-          try {
-            await rename(bak, dataDir) // 回滚:旧目录归位
-          } catch (rollbackErr) {
-            console.error(`导入回滚失败:旧数据完好保存在 ${bak},当前将运行在空库上`, rollbackErr)
-          }
-          throw err
-        }
+        await swapContents(dataDir, tmpDir, bak)
       } finally {
         // 无论换成新旧哪套目录,都要重开 db 恢复服务;这段再抛会把 deps.db 留在已关闭
         // 状态、executor 永久暂停,必须自兜底
@@ -113,4 +105,45 @@ export function backupRoutes(deps: AppDeps) {
   })
 
   return app
+}
+
+/** 导入自身产生的目录内条目(.import-* / .bak-*),换内容时跳过 */
+function isManagedEntry(name: string): boolean {
+  return name.startsWith('.import-') || name.startsWith('.bak-')
+}
+
+/**
+ * 目录内换内容:旧条目搬进 bak,tmpDir 的新条目搬进 dataDir。
+ * 不 rename dataDir 自身——它可能是 Docker volume 挂载点(EBUSY),
+ * 且所有搬移都在同一文件系统内(不会 EXDEV)。
+ * 失败时回滚:先清掉已搬入的新条目,再把旧条目从 bak 归位。
+ */
+async function swapContents(dataDir: string, tmpDir: string, bak: string): Promise<void> {
+  await mkdir(bak)
+  const moved: string[] = []
+  const placed: string[] = []
+  try {
+    for (const name of await readdir(dataDir)) {
+      if (isManagedEntry(name)) continue
+      await rename(join(dataDir, name), join(bak, name))
+      moved.push(name)
+    }
+    for (const name of await readdir(tmpDir)) {
+      await rename(join(tmpDir, name), join(dataDir, name))
+      placed.push(name)
+    }
+  } catch (err) {
+    try {
+      for (const name of placed) {
+        await rm(join(dataDir, name), { recursive: true, force: true })
+      }
+      for (const name of moved) {
+        await rename(join(bak, name), join(dataDir, name))
+      }
+      await rm(bak, { recursive: true, force: true })
+    } catch (rollbackErr) {
+      console.error(`导入回滚失败:旧数据保存在 ${bak},当前数据目录可能不完整`, rollbackErr)
+    }
+    throw err
+  }
 }

@@ -82,6 +82,11 @@ web 按惯例不写渲染测试，手动验收清单（放 PR 描述）：
 5. 有任务运行中导入 → 等当前任务完成后切换，任务不丢
 6. 导入后新建批次、跑图正常（executor 换库后工作正常）
 
+## 修订（2026-07-29，验收反馈）
+
+- **热切换不再 rename dataDir 自身**：Docker 部署时 dataDir 是 volume 挂载点，`rename(dataDir, bak)` 报 EBUSY；且挂载点外的临时目录与 dataDir 跨文件系统，rename 会 EXDEV。改为：临时 zip / 解压目录 / bak 全部放在 dataDir 内部（`.import-<stamp>.zip`、`.import-<stamp>/`、`.bak-<stamp>/`），切换时目录内逐项搬移（旧条目 → bak，新条目 → dataDir），失败按已搬清单回滚。导出与 `.import-*`/`.bak-*` 互不可见（导出只取 db.sqlite/uploads/outputs）。
+- **前端导入期间锁定 UI**：全屏遮罩阻断页内一切操作 + `beforeunload` 拦截刷新/关闭，完成后自动刷新。导出为浏览器托管下载，开始后离开页面不影响，页面文案说明。
+
 ## 已知取舍
 
 - bak 目录只增不删，磁盘占用靠手动清理——备份安全优先，工具单用户可接受
