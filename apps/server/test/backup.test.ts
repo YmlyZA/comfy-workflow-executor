@@ -1,8 +1,8 @@
 import { EventEmitter } from 'node:events'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, join } from 'node:path'
+import { join } from 'node:path'
 import archiver from 'archiver'
 import Database from 'better-sqlite3'
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -91,6 +91,7 @@ const HZ = { Authorization: 'Bearer secret', 'Content-Type': 'application/zip' }
 describe('POST /api/import', () => {
   it('整体替换:新库数据生效,uploads 落位,bak 目录保留旧库', async () => {
     repo.createTemplate(deps.db, { name: 'OLD', comfyJson: {}, params: [] })
+    const inoBefore = statSync(dataDir).ino
     const zip = await buildBackupZip('FROM-ZIP')
     const res = await app.request('/api/import', { method: 'POST', headers: HZ, body: new Uint8Array(zip) })
     expect(res.status).toBe(200)
@@ -100,11 +101,13 @@ describe('POST /api/import', () => {
     expect(list).toEqual(['FROM-ZIP'])
     expect(existsSync(join(dataDir, 'uploads', 'from-zip.png'))).toBe(true)
     expect(existsSync(join(dataDir, 'outputs'))).toBe(true)
+    // dataDir 自身从未被 rename(挂载点场景 rename 会 EBUSY),换的是目录内容
+    expect(statSync(dataDir).ino).toBe(inoBefore)
 
-    const parent = join(dataDir, '..')
-    const bak = readdirSync(parent).find((n) => n.startsWith(`${basename(dataDir)}.bak-`))
+    // bak 在 dataDir 内部(dataDir 可能是 Docker volume 挂载点,不能整体 rename)
+    const bak = readdirSync(dataDir).find((n) => n.startsWith('.bak-'))
     expect(bak).toBeDefined()
-    const old = new Database(join(parent, bak!, 'db.sqlite'), { readonly: true })
+    const old = new Database(join(dataDir, bak!, 'db.sqlite'), { readonly: true })
     const row = old.prepare('SELECT name FROM templates').get() as { name: string }
     old.close()
     expect(row.name).toBe('OLD')
@@ -161,10 +164,7 @@ describe('POST /api/import', () => {
       headers: HZ,
       body: new Uint8Array(Buffer.from('not a zip at all')),
     })
-    const parent = join(dataDir, '..')
-    const leftovers = readdirSync(parent).filter((n) =>
-      n.startsWith(`${basename(dataDir)}.import-`),
-    )
+    const leftovers = readdirSync(dataDir).filter((n) => n.startsWith('.import-'))
     expect(leftovers).toEqual([])
   })
 

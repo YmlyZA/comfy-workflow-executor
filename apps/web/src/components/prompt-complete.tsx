@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { fetchPrompts, type PromptRow } from '@/lib/prompts'
@@ -44,6 +45,29 @@ function usePromptComplete<T extends HTMLInputElement | HTMLTextAreaElement>(
       )
     : []
   const highlighted = Math.min(hi, Math.max(matches.length - 1, 0))
+
+  // 下拉 portal 到 body 用 fixed 定位:输入框可能在 overflow 容器里(如表格 tab 的
+  // Table 外层 overflow-x-auto),就地 absolute 定位会被裁剪不可见
+  const [rect, setRect] = useState<{ left: number; top: number; width: number } | null>(null)
+  useLayoutEffect(() => {
+    if (!open) {
+      setRect(null)
+      return
+    }
+    const el = elRef.current
+    if (!el) return
+    const update = () => {
+      const r = el.getBoundingClientRect()
+      setRect({ left: r.left, top: r.bottom, width: r.width })
+    }
+    update()
+    window.addEventListener('scroll', update, true)
+    window.addEventListener('resize', update)
+    return () => {
+      window.removeEventListener('scroll', update, true)
+      window.removeEventListener('resize', update)
+    }
+  }, [open])
 
   // 受控组件的 value 更新落地后,把光标精确放到插入内容末尾(而不是浏览器默认的整段末尾)
   useLayoutEffect(() => {
@@ -96,8 +120,12 @@ function usePromptComplete<T extends HTMLInputElement | HTMLTextAreaElement>(
     }
   }
 
-  const dropdown = open ? (
-    <div className="absolute left-0 top-full z-50 mt-1 max-h-64 w-full min-w-56 overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
+  const dropdown = open && rect ? (
+    createPortal(
+    <div
+      className="fixed z-50 max-h-64 overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
+      style={{ left: rect.left, top: rect.top + 4, width: Math.max(rect.width, 224) }}
+    >
       {matches.map((p, i) => (
         <button
           key={p.id}
@@ -116,7 +144,9 @@ function usePromptComplete<T extends HTMLInputElement | HTMLTextAreaElement>(
       {matches.length === 0 && (
         <div className="px-2 py-1.5 text-sm text-muted-foreground">（无匹配）</div>
       )}
-    </div>
+    </div>,
+    document.body,
+    )
   ) : null
 
   return {

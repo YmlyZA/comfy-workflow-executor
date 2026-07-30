@@ -1,5 +1,5 @@
-import { DownloadIcon, UploadIcon } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { DownloadIcon, Loader2Icon, UploadIcon } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,12 +28,27 @@ export default function BackupPage() {
   const [msg, setMsg] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
 
+  // 导入中拦截刷新/关闭:服务端正在整体替换数据,中途离开会看不到结果(切换本身在服务端继续)。
+  // 守卫放 ref:成功路径要在自动 reload 前同步摘掉,等 setState 触发 effect 清理来不及,
+  // 否则会被自己的守卫拦下弹出浏览器确认框
+  const unloadGuard = useRef((e: BeforeUnloadEvent) => {
+    e.preventDefault()
+    e.returnValue = ''
+  })
+  useEffect(() => {
+    if (!busy) return
+    const handler = unloadGuard.current
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [busy])
+
   async function doImport(file: File) {
     setBusy(true)
     setMsg('导入中……若有任务在运行，会先等它完成再切换')
     try {
       await importBackup(file)
       setMsg('导入成功，即将刷新')
+      window.removeEventListener('beforeunload', unloadGuard.current)
       window.location.reload()
     } catch (e) {
       setMsg(`导入失败：${errMsg(e)}`)
@@ -49,6 +64,7 @@ export default function BackupPage() {
         <p className="text-sm font-medium">导出</p>
         <p className="text-sm text-muted-foreground">
           打包下载全部数据（数据库 + 输入图 + 产出图；不含可再生的缩略图缓存）。
+          下载由浏览器接管，开始后可离开本页面。
         </p>
         <Button size="sm" asChild>
           <a href={backupExportUrl()} download>
@@ -77,6 +93,16 @@ export default function BackupPage() {
       </section>
 
       {msg && <p className="text-sm">{msg}</p>}
+
+      {busy && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-background/80 backdrop-blur-sm">
+          <Loader2Icon className="size-8 animate-spin" />
+          <p className="text-sm font-medium">导入中，请勿刷新或关闭页面</p>
+          <p className="text-sm text-muted-foreground">
+            若有任务在运行，会先等它完成再切换；完成后页面自动刷新
+          </p>
+        </div>
+      )}
 
       <AlertDialog open={pendingFile !== null} onOpenChange={(o) => !o && setPendingFile(null)}>
         <AlertDialogContent>
