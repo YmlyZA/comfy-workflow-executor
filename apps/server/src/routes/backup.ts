@@ -7,10 +7,14 @@ import archiver from 'archiver'
 import { Hono } from 'hono'
 import type { AppDeps } from '../app.js'
 import { createDb } from '../db/index.js'
+import { ensureActiveHost } from '../db/repo.js'
+import { createAsyncLock, reconnectComfy } from '../host-switch.js'
 import { extractZip } from '../zip.js'
 
 export function backupRoutes(deps: AppDeps) {
   const app = new Hono()
+  // 与主机切换共用同一把锁(同一个 deps 对象,谁先建谁负责初始化)
+  const lock = (deps.switchLock ??= createAsyncLock())
 
   app.get('/export', (c) => {
     // WAL 合回主库,zip 里的 db.sqlite 才含最近写入
@@ -77,25 +81,32 @@ export function backupRoutes(deps: AppDeps) {
       }
       if (!valid) return c.json({ error: 'zip 内缺少有效的 db.sqlite' }, 400)
 
-      // 热切换:暂停执行器 → 关库 → 目录内逐项换内容(留 bak) → 重开 → 换引用 → 复跑
-      await deps.executor?.pause()
-      deps.db.$client.close()
-      const bak = join(dataDir, `.bak-${stamp}`)
-      try {
-        await swapContents(dataDir, tmpDir, bak)
-      } finally {
-        // 无论换成新旧哪套目录,都要重开 db 恢复服务;这段再抛会把 deps.db 留在已关闭
-        // 状态、executor 永久暂停,必须自兜底
+      // 热切换:暂停执行器 → 关库 → 目录内逐项换内容(留 bak) → 重开 → 换引用 → 复跑。
+      // 整段进锁:与主机切换(activate / 改 active URL)互斥,否则两边各自 pause→resume
+      // 会同时起两个 executor loop(详见 host-switch.ts)
+      await lock.run(async () => {
+        await deps.executor?.pause()
+        deps.db.$client.close()
+        const bak = join(dataDir, `.bak-${stamp}`)
         try {
-          await mkdir(join(dataDir, 'uploads'), { recursive: true })
-          await mkdir(join(dataDir, 'outputs'), { recursive: true })
-          const reopened = createDb(join(dataDir, 'db.sqlite'))
-          deps.db = reopened
-          deps.executor?.resume(reopened)
-        } catch (reopenErr) {
-          console.error('导入后重开数据库失败,需要重启服务', reopenErr)
+          await swapContents(dataDir, tmpDir, bak)
+        } finally {
+          // 无论换成新旧哪套目录,都要重开 db 恢复服务;这段再抛会把 deps.db 留在已关闭
+          // 状态、executor 永久暂停,必须自兜底
+          try {
+            await mkdir(join(dataDir, 'uploads'), { recursive: true })
+            await mkdir(join(dataDir, 'outputs'), { recursive: true })
+            const reopened = createDb(join(dataDir, 'db.sqlite'))
+            deps.db = reopened
+            // 导入的库自带 hosts 表(或旧版库由 ensureActiveHost 补种),按其 active 主机
+            // 重建连接并广播在线状态(与主机切换同一套流程)
+            const activeHost = ensureActiveHost(reopened, deps.config.comfyUrl)
+            await reconnectComfy(deps, activeHost)
+          } catch (reopenErr) {
+            console.error('导入后重开数据库失败,需要重启服务', reopenErr)
+          }
         }
-      }
+      })
       return c.json({ ok: true })
     } finally {
       importing = false

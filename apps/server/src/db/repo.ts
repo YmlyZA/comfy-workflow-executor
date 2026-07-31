@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gt, inArray, lt, sql } from 'drizzle-orm'
 import type { CreateBatchInput, CreateTemplateInput, OutputFile, ParamValues } from '@cwe/shared'
 import type { Db } from './index.js'
-import { batches, inputHistory, jobs, prompts, templates, type Batch, type Job, type Prompt, type Template } from './schema.js'
+import { batches, hosts, inputHistory, jobs, prompts, templates, type Batch, type Host, type Job, type Prompt, type Template } from './schema.js'
 
 const now = () => new Date().toISOString()
 
@@ -89,13 +89,18 @@ export function listBatches(
 export function getBatchDetail(
   db: Db,
   id: number,
-): { batch: Batch; template: Template; jobs: Job[] } | undefined {
+): { batch: Batch; template: Template; jobs: Job[]; hostNames: Record<number, string> } | undefined {
   const batch = db.select().from(batches).where(eq(batches.id, id)).get()
   if (!batch) return undefined
   const template = getTemplate(db, batch.templateId)
   if (!template) return undefined
   const rows = db.select().from(jobs).where(eq(jobs.batchId, id)).orderBy(asc(jobs.sortOrder)).all()
-  return { batch, template, jobs: rows }
+  const hostRows = db.select({ id: hosts.id, name: hosts.name }).from(hosts).all()
+  const hostNames = Object.fromEntries(hostRows.map((h) => [h.id, h.name])) as Record<
+    number,
+    string
+  >
+  return { batch, template, jobs: rows, hostNames }
 }
 
 /** 相邻 batch 导航:prev=更早(小于当前的最大 id),next=更新(大于当前的最小 id) */
@@ -103,6 +108,68 @@ export function getBatchNav(db: Db, id: number): { prevId: number | null; nextId
   const prev = db.select({ id: batches.id }).from(batches).where(lt(batches.id, id)).orderBy(desc(batches.id)).limit(1).get()
   const next = db.select({ id: batches.id }).from(batches).where(gt(batches.id, id)).orderBy(asc(batches.id)).limit(1).get()
   return { prevId: prev?.id ?? null, nextId: next?.id ?? null }
+}
+
+// -- hosts --
+
+export function listHosts(db: Db): Host[] {
+  return db.select().from(hosts).orderBy(asc(hosts.id)).all()
+}
+
+export function getHost(db: Db, id: number): Host | undefined {
+  return db.select().from(hosts).where(eq(hosts.id, id)).get()
+}
+
+export function getActiveHost(db: Db): Host | undefined {
+  return db.select().from(hosts).where(eq(hosts.active, 1)).get()
+}
+
+export function createHost(
+  db: Db,
+  input: { name: string; url: string; note?: string | null },
+): Host {
+  return db.insert(hosts).values(input).returning().get()
+}
+
+export function updateHost(
+  db: Db,
+  id: number,
+  patch: { name?: string; url?: string; note?: string | null },
+): Host | undefined {
+  return db.update(hosts).set(patch).where(eq(hosts.id, id)).returning().get()
+}
+
+export function deleteHost(db: Db, id: number): 'ok' | 'active' {
+  return db.transaction((tx) => {
+    const row = tx.select().from(hosts).where(eq(hosts.id, id)).get()
+    if (!row) return 'ok'
+    if (row.active === 1) return 'active'
+    tx.delete(hosts).where(eq(hosts.id, id)).run()
+    return 'ok'
+  })
+}
+
+/** 单活不变量:事务内全表清零再置目标为 1 */
+export function activateHost(db: Db, id: number): Host | undefined {
+  return db.transaction((tx) => {
+    const row = tx.select().from(hosts).where(eq(hosts.id, id)).get()
+    if (!row) return undefined
+    tx.update(hosts).set({ active: 0 }).run()
+    return tx.update(hosts).set({ active: 1 }).where(eq(hosts.id, id)).returning().get()
+  })
+}
+
+/** 种子与自愈:空表种默认主机;非空无 active 激活 id 最小;COMFYUI_URL 仅在此作首次种子 */
+export function ensureActiveHost(db: Db, seedUrl: string): Host {
+  return db.transaction((tx) => {
+    const active = tx.select().from(hosts).where(eq(hosts.active, 1)).get()
+    if (active) return active
+    const first = tx.select().from(hosts).orderBy(asc(hosts.id)).limit(1).get()
+    if (first) {
+      return tx.update(hosts).set({ active: 1 }).where(eq(hosts.id, first.id)).returning().get()!
+    }
+    return tx.insert(hosts).values({ name: '默认主机', url: seedUrl, active: 1 }).returning().get()
+  })
 }
 
 // -- executor queue --
@@ -122,7 +189,12 @@ export function claimNextJob(db: Db): { job: Job; template: Template } | undefin
     if (!template) return undefined
     const job = tx
       .update(jobs)
-      .set({ status: 'running', startedAt: now(), error: null })
+      .set({
+        status: 'running',
+        startedAt: now(),
+        error: null,
+        hostId: sql<number | null>`(SELECT id FROM hosts WHERE active = 1)`,
+      })
       .where(and(eq(jobs.id, row.job.id), eq(jobs.status, 'pending')))
       .returning()
       .get()

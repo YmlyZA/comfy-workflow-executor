@@ -11,6 +11,12 @@ import type { Job, Template } from './db/schema.js'
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+/** 主机切换的中断模式:放弃当前 job(重置回 pending 而非 failed) */
+class AbandonError extends Error {}
+
+/** 已停机(pause 等待中)时,getHistory 连续失败多少轮就判定主机已死并放弃当前 job */
+const UNREACHABLE_ABANDON_POLLS = 3
+
 export interface ExecutorDeps {
   db: Db
   comfy: ComfyClient
@@ -21,7 +27,7 @@ export interface ExecutorDeps {
 
 export class Executor {
   private db: Db
-  private readonly comfy: ComfyClient
+  private comfy: ComfyClient
   private readonly events: EventEmitter
   private readonly dataDir: string
   private readonly pollMs: number
@@ -30,6 +36,7 @@ export class Executor {
   private currentJobId: number | null = null
   private disconnectWs: (() => void) | null = null
   private loopPromise: Promise<void> | null = null
+  private abandonRequested = false
   /** 本地 stored 名 → GPU 侧返回名;进程内去重,重启后靠 overwrite 幂等重传 */
   private readonly gpuUploads = new Map<string, string>()
 
@@ -41,7 +48,10 @@ export class Executor {
     this.pollMs = deps.pollMs ?? 2000
   }
 
+  /** 起循环。已在跑时直接返回:重复 start 会起出第二个 loop(其中一个成孤儿,
+   * 永远不会被 pause 等到),并造成同一批 job 被两条流水线重复认领 */
   start(): void {
+    if (this.running) return
     this.running = true
     this.disconnectWs = this.comfy.connectEvents(this.clientId, (e) => {
       if (e.type === 'progress' && this.currentJobId != null) {
@@ -61,16 +71,31 @@ export class Executor {
     this.disconnectWs?.()
   }
 
-  /** 停下并等当前任务/轮询收尾(数据导入热切换用) */
-  async pause(): Promise<void> {
+  /** 停下并等当前任务/轮询收尾(导入热切换与主机切换共用)。
+   * abandon:放弃当前 job——对旧主机发 interrupt(失败吞掉,主机可能已死),
+   * waitForHistory 察觉标志后抛 AbandonError,job 重置回 pending 由新主机重跑。
+   *
+   * stop() 必须排在 interrupt 之前:interrupt 是一次网络往返,期间若循环还在跑,
+   * 它会立刻认领并提交下一个 job(甚至把刚被放弃的这个重新捞起来)提交到即将被
+   * 弃用的旧主机上。先置 running=false 才能保证这轮往返里循环不再取新活。 */
+  async pause(opts?: { abandon?: boolean }): Promise<void> {
     this.stop()
-    await this.loopPromise
-    this.loopPromise = null
+    if (opts?.abandon) {
+      this.abandonRequested = true
+      await this.comfy.interrupt().catch(() => {})
+    }
+    // 捕获自己要等的那个 loop:若期间已有人 start 了新 loop,不能把新的 loopPromise
+    // 抹成 null(否则下一次 pause 会瞬间返回,却有循环仍在后台跑)
+    const pending = this.loopPromise
+    await pending
+    if (this.loopPromise === pending) this.loopPromise = null
+    this.abandonRequested = false
   }
 
-  /** 换库后重启(数据导入热切换用);GPU 上传映射清空,靠 overwrite 幂等重传 */
-  resume(db: Db): void {
+  /** 换库/换主机后重启;GPU 上传映射清空,靠 overwrite 幂等重传 */
+  resume(db: Db, comfy?: ComfyClient): void {
     this.db = db
+    if (comfy) this.comfy = comfy
     this.gpuUploads.clear()
     this.start()
   }
@@ -106,9 +131,14 @@ export class Executor {
       const finalStatus = repo.getJob(this.db, job.id)?.status ?? 'succeeded'
       this.emit({ type: 'job-updated', jobId: job.id, batchId: job.batchId, status: finalStatus })
     } catch (err) {
-      repo.failJob(this.db, job.id, err instanceof Error ? err.message : String(err))
-      const finalStatus = repo.getJob(this.db, job.id)?.status ?? 'failed'
-      this.emit({ type: 'job-updated', jobId: job.id, batchId: job.batchId, status: finalStatus })
+      if (err instanceof AbandonError) {
+        repo.resetJobToPending(this.db, job.id)
+        this.emit({ type: 'job-updated', jobId: job.id, batchId: job.batchId, status: 'pending' })
+      } else {
+        repo.failJob(this.db, job.id, err instanceof Error ? err.message : String(err))
+        const finalStatus = repo.getJob(this.db, job.id)?.status ?? 'failed'
+        this.emit({ type: 'job-updated', jobId: job.id, batchId: job.batchId, status: finalStatus })
+      }
     } finally {
       this.currentJobId = null
     }
@@ -146,7 +176,9 @@ export class Executor {
   private async waitForHistory(promptId: string): Promise<ComfyHistoryEntry> {
     let backoff = this.pollMs
     let lostCount = 0
+    let errorCount = 0
     for (;;) {
+      if (this.abandonRequested) throw new AbandonError('主机切换,放弃当前任务')
       let entry: ComfyHistoryEntry | null
       let stillQueued = true
       try {
@@ -159,11 +191,19 @@ export class Executor {
         }
       } catch {
         // ComfyUI 掉线 / 查询失败：等待重连，batch 保持 running 不失败
+        errorCount++
+        // 例外:已被 stop()(热切换等待模式在等收尾)且主机连续多轮不可达 —— 说明这台
+        // 主机已经死了,再等下去 pause() 永远不返回、切换界面一直转圈。按放弃处理:
+        // job 重置回 pending,由新主机重跑。循环还在跑(running)时不受影响,仍旧无限等。
+        if (!this.running && errorCount >= UNREACHABLE_ABANDON_POLLS) {
+          throw new AbandonError('主机连续不可达,放弃当前任务')
+        }
         await sleep(backoff)
         backoff = Math.min(backoff * 2, 30_000)
         continue
       }
       backoff = this.pollMs
+      errorCount = 0
       if (entry?.status?.completed) return entry
       if (entry?.status?.status_str === 'error') {
         throw new Error(

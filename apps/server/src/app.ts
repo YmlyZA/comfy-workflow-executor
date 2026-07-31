@@ -5,11 +5,15 @@ import { auth } from './auth.js'
 import type { Config } from './config.js'
 import type { Db } from './db/index.js'
 import type { ComfyClient } from './comfy/client.js'
+import { ObjectInfoCache } from './comfy/object-info-cache.js'
+import { getActiveHost } from './db/repo.js'
+import type { AsyncLock } from './host-switch.js'
 import { templateRoutes } from './routes/templates.js'
 import { batchRoutes } from './routes/batches.js'
 import { eventRoutes } from './routes/events.js'
 import { downloadRoute, outputRoutes, uploadRoutes } from './routes/files.js'
 import { comfyRoutes } from './routes/comfy.js'
+import { hostRoutes } from './routes/hosts.js'
 import { inputHistoryRoutes } from './routes/input-history.js'
 import { promptRoutes } from './routes/prompts.js'
 import { thumbRoutes } from './routes/thumbs.js'
@@ -21,10 +25,15 @@ export interface AppDeps {
   comfy: ComfyClient | null
   events: EventEmitter
   /** 数据导入热切换用;测试/无 GPU 场景可为 null */
-  executor?: { pause(): Promise<void>; resume(db: Db): void } | null
+  executor?: { pause(opts?: { abandon?: boolean }): Promise<void>; resume(db: Db, comfy?: ComfyClient): void } | null
+  /** /object_info 缓存;由 createApp 自动初始化 */
+  objectInfo?: ObjectInfoCache
+  /** 热切换串行锁(主机切换 / 改 active URL / 数据导入共用);由各路由首次使用时自动初始化 */
+  switchLock?: AsyncLock
 }
 
 export function createApp(deps: AppDeps) {
+  deps.objectInfo ??= new ObjectInfoCache(() => deps.comfy)
   const app = new Hono()
 
   app.onError((err, c) => {
@@ -35,10 +44,16 @@ export function createApp(deps: AppDeps) {
 
   app.use('/api/*', auth(deps.config.authToken))
 
-  app.get('/api/health', async (c) =>
-    c.json({ ok: true, comfy: deps.comfy ? await deps.comfy.isUp() : false }),
-  )
+  app.get('/api/health', async (c) => {
+    const host = getActiveHost(deps.db)
+    return c.json({
+      ok: true,
+      comfy: deps.comfy ? await deps.comfy.isUp() : false,
+      host: host ? { id: host.id, name: host.name } : null,
+    })
+  })
   app.route('/api', backupRoutes(deps))
+  app.route('/api/hosts', hostRoutes(deps))
   app.route('/api/comfy', comfyRoutes(deps))
   app.route('/api/templates', templateRoutes(deps))
   app.route('/api/events', eventRoutes(deps))
