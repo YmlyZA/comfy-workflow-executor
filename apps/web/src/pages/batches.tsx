@@ -32,6 +32,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { DataTable, SortableHeader, selectColumn } from '@/components/data-table/data-table'
+import { OfflineBanner } from '@/components/offline-banner'
 import { useEvents } from '@/hooks/use-events'
 import { useCweStatus } from '@/hooks/use-cwe-status'
 import { api } from '@/lib/api'
@@ -130,6 +131,7 @@ export default function BatchesPage() {
           <Link to="/batches/new">New Batch</Link>
         </Button>
       </div>
+      <OfflineBanner hasActiveWork={batches.some((b) => b.status === 'running' || b.status === 'pending')} />
       {banner && <p className="text-sm text-muted-foreground">{banner}</p>}
       <DataTable
         columns={columns}

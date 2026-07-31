@@ -21,6 +21,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { OfflineBanner } from '@/components/offline-banner'
 import { useEvents } from '@/hooks/use-events'
 import { api, downloadUrl, outputUrl } from '@/lib/api'
 import { statusVariant } from '@/pages/batches'
@@ -37,6 +38,7 @@ export interface JobDto {
   comfyPromptId: string | null
   startedAt: string | null
   finishedAt: string | null
+  hostId: number | null
 }
 
 export interface BatchDetailDto {
@@ -44,6 +46,7 @@ export interface BatchDetailDto {
   template: TemplateDto
   jobs: JobDto[]
   nav: { prevId: number | null; nextId: number | null }
+  hostNames: Record<number, string>
 }
 
 export default function BatchDetailPage() {
@@ -137,6 +140,8 @@ export default function BatchDetailPage() {
         </div>
       </div>
 
+      <OfflineBanner hasActiveWork={['pending', 'running'].includes(batch.status)} />
+
       <div className="space-y-1">
         <Progress value={(done / Math.max(jobs.length, 1)) * 100} />
         <p className="text-sm text-muted-foreground">
@@ -150,6 +155,7 @@ export default function BatchDetailPage() {
             <TableHead>#</TableHead>
             <TableHead>参数</TableHead>
             <TableHead>状态</TableHead>
+            <TableHead>主机</TableHead>
             <TableHead>输出 / 错误</TableHead>
           </TableRow>
         </TableHeader>
@@ -167,6 +173,9 @@ export default function BatchDetailPage() {
                     {progress[j.id]!.value}/{progress[j.id]!.max}
                   </span>
                 )}
+              </TableCell>
+              <TableCell className="text-xs text-muted-foreground">
+                {j.hostId != null ? (data.hostNames[j.hostId] ?? '已删除主机') : '—'}
               </TableCell>
               <TableCell className="max-w-96 truncate text-xs">
                 {j.error ? (
