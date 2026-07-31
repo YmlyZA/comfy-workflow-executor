@@ -11,6 +11,9 @@ import type { Job, Template } from './db/schema.js'
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+/** 主机切换的中断模式:放弃当前 job(重置回 pending 而非 failed) */
+class AbandonError extends Error {}
+
 export interface ExecutorDeps {
   db: Db
   comfy: ComfyClient
@@ -21,7 +24,7 @@ export interface ExecutorDeps {
 
 export class Executor {
   private db: Db
-  private readonly comfy: ComfyClient
+  private comfy: ComfyClient
   private readonly events: EventEmitter
   private readonly dataDir: string
   private readonly pollMs: number
@@ -30,6 +33,7 @@ export class Executor {
   private currentJobId: number | null = null
   private disconnectWs: (() => void) | null = null
   private loopPromise: Promise<void> | null = null
+  private abandonRequested = false
   /** 本地 stored 名 → GPU 侧返回名;进程内去重,重启后靠 overwrite 幂等重传 */
   private readonly gpuUploads = new Map<string, string>()
 
@@ -61,16 +65,24 @@ export class Executor {
     this.disconnectWs?.()
   }
 
-  /** 停下并等当前任务/轮询收尾(数据导入热切换用) */
-  async pause(): Promise<void> {
+  /** 停下并等当前任务/轮询收尾(导入热切换与主机切换共用)。
+   * abandon:放弃当前 job——对旧主机发 interrupt(失败吞掉,主机可能已死),
+   * waitForHistory 察觉标志后抛 AbandonError,job 重置回 pending 由新主机重跑 */
+  async pause(opts?: { abandon?: boolean }): Promise<void> {
+    if (opts?.abandon) {
+      this.abandonRequested = true
+      await this.comfy.interrupt().catch(() => {})
+    }
     this.stop()
     await this.loopPromise
     this.loopPromise = null
+    this.abandonRequested = false
   }
 
-  /** 换库后重启(数据导入热切换用);GPU 上传映射清空,靠 overwrite 幂等重传 */
-  resume(db: Db): void {
+  /** 换库/换主机后重启;GPU 上传映射清空,靠 overwrite 幂等重传 */
+  resume(db: Db, comfy?: ComfyClient): void {
     this.db = db
+    if (comfy) this.comfy = comfy
     this.gpuUploads.clear()
     this.start()
   }
@@ -106,9 +118,14 @@ export class Executor {
       const finalStatus = repo.getJob(this.db, job.id)?.status ?? 'succeeded'
       this.emit({ type: 'job-updated', jobId: job.id, batchId: job.batchId, status: finalStatus })
     } catch (err) {
-      repo.failJob(this.db, job.id, err instanceof Error ? err.message : String(err))
-      const finalStatus = repo.getJob(this.db, job.id)?.status ?? 'failed'
-      this.emit({ type: 'job-updated', jobId: job.id, batchId: job.batchId, status: finalStatus })
+      if (err instanceof AbandonError) {
+        repo.resetJobToPending(this.db, job.id)
+        this.emit({ type: 'job-updated', jobId: job.id, batchId: job.batchId, status: 'pending' })
+      } else {
+        repo.failJob(this.db, job.id, err instanceof Error ? err.message : String(err))
+        const finalStatus = repo.getJob(this.db, job.id)?.status ?? 'failed'
+        this.emit({ type: 'job-updated', jobId: job.id, batchId: job.batchId, status: finalStatus })
+      }
     } finally {
       this.currentJobId = null
     }
@@ -147,6 +164,7 @@ export class Executor {
     let backoff = this.pollMs
     let lostCount = 0
     for (;;) {
+      if (this.abandonRequested) throw new AbandonError('主机切换,放弃当前任务')
       let entry: ComfyHistoryEntry | null
       let stillQueued = true
       try {

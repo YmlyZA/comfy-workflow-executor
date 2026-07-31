@@ -269,3 +269,48 @@ describe('pause/resume(数据导入热切换)', () => {
     expect(repo.listBatches(db)).toHaveLength(0)
   })
 })
+
+describe('pause({abandon})/resume(主机切换)', () => {
+  it('pause({abandon}) 中断当前 job 重置回 pending,batch 保持 running', async () => {
+    const b = seed()
+    comfy.historyDelayPolls = 1e9
+    const ex = makeExecutor()
+    ex.start()
+    await vi.waitFor(() => {
+      expect(repo.listRunningJobs(db)).toHaveLength(1)
+    })
+    await ex.pause({ abandon: true })
+    expect(comfy.interrupts).toBe(1)
+    const detail = repo.getBatchDetail(db, b.id)!
+    expect(detail.jobs[0]!.status).toBe('pending')
+    expect(detail.batch.status).toBe('running')
+  })
+
+  it('resume 换 client 后任务在新 comfy 上执行,gpuUploads 清空', async () => {
+    seed()
+    comfy.historyDelayPolls = 1e9
+    const ex = makeExecutor()
+    ex.start()
+    await vi.waitFor(() => expect(repo.listRunningJobs(db)).toHaveLength(1))
+    await ex.pause({ abandon: true })
+    const next = new FakeComfy()
+    ex.resume(db, next)
+    await vi.waitFor(() => expect(next.submitted).toHaveLength(1))
+    ex.stop()
+    await ex.pause()
+    expect(comfy.submitted).toHaveLength(1) // 旧 client 没有二次提交
+  })
+
+  it('abandon 时旧主机 interrupt 抛错不阻断切换', async () => {
+    seed()
+    comfy.historyDelayPolls = 1e9
+    comfy.interrupt = async () => {
+      throw new Error('host dead')
+    }
+    const ex = makeExecutor()
+    ex.start()
+    await vi.waitFor(() => expect(repo.listRunningJobs(db)).toHaveLength(1))
+    await ex.pause({ abandon: true })
+    expect(repo.listRunningJobs(db)).toHaveLength(0)
+  })
+})
