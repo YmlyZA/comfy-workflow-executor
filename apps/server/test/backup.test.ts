@@ -134,6 +134,45 @@ describe('POST /api/import', () => {
     expect(resumedDb).not.toBe(oldDb)
   })
 
+  it('导入与主机切换共用切换锁,不会交错', async () => {
+    const calls: string[] = []
+    let release!: () => void
+    const gate = new Promise<void>((r) => {
+      release = r
+    })
+    let first = true
+    deps.executor = {
+      pause: async () => {
+        calls.push('pause-start')
+        if (first) {
+          first = false
+          await gate
+        }
+        calls.push('pause-end')
+      },
+      resume: () => calls.push('resume'),
+    }
+    repo.ensureActiveHost(deps.db, 'http://a:8188')
+    const other = repo.createHost(deps.db, { name: 'B', url: 'http://b:8188' })
+    const zip = await buildBackupZip('LOCKED')
+
+    const pAct = app.request(`/api/hosts/${other.id}/activate`, {
+      method: 'POST',
+      headers: { ...H, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'wait' }),
+    })
+    await new Promise((r) => setTimeout(r, 20))
+    const pImp = app.request('/api/import', { method: 'POST', headers: HZ, body: new Uint8Array(zip) })
+    await new Promise((r) => setTimeout(r, 20))
+    // 导入已解包完毕,但热切换段被锁挡住,还没 pause
+    expect(calls).toEqual(['pause-start'])
+
+    release()
+    expect((await pAct).status).toBe(200)
+    expect((await pImp).status).toBe(200)
+    expect(calls).toEqual(['pause-start', 'pause-end', 'resume', 'pause-start', 'pause-end', 'resume'])
+  }, 20000)
+
   it('导入含 hosts 表的库后,按其 active 主机重建连接', async () => {
     const tmpDbDir = mkdtempSync(join(tmpdir(), 'cwe-hosts-db-'))
     const tmpDb = createDb(join(tmpDbDir, 'db.sqlite'))
@@ -148,10 +187,16 @@ describe('POST /api/import', () => {
     await archive.finalize()
     const zip = Buffer.concat(chunks)
 
+    const seen: any[] = []
+    deps.events.on('event', (e) => e.type === 'comfy-status' && seen.push(e))
     const res = await app.request('/api/import', { method: 'POST', headers: HZ, body: new Uint8Array(zip) })
     expect(res.status).toBe(200)
-    expect(repo.getActiveHost(deps.db)?.url).toBe('http://imported:8188')
-  })
+    const host = repo.getActiveHost(deps.db)!
+    expect(host.url).toBe('http://imported:8188')
+    // 重开后与主机切换一样广播一次在线状态(前端角标不会停留在旧主机上)
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).toMatchObject({ online: false, hostId: host.id, hostName: host.name })
+  }, 20000)
 
   it('合法 sqlite 但 createDb 会炸的库(templates 是视图) → 400,服务照常', async () => {
     repo.createTemplate(deps.db, { name: 'KEEP', comfyJson: {}, params: [] })

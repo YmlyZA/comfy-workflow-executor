@@ -104,10 +104,11 @@ export interface HealthDto {
 
 export const fetchHosts = () => api<{ hosts: HostDto[] }>('/hosts')
 
-export const createHost = (input: { name: string; url: string; note?: string }) =>
+export const createHost = (input: { name: string; url: string; note?: string | null }) =>
   api<{ host: HostDto }>('/hosts', { method: 'POST', body: JSON.stringify(input) })
 
-export const updateHost = (id: number, patch: { name?: string; url?: string; note?: string }) =>
+/** note 传 null 表示清空备注(传 undefined 会被 JSON 丢键,服务端保留原值) */
+export const updateHost = (id: number, patch: { name?: string; url?: string; note?: string | null }) =>
   api<{ host: HostDto }>(`/hosts/${id}`, { method: 'PATCH', body: JSON.stringify(patch) })
 
 export const deleteHost = (id: number) => api<{ ok: true }>(`/hosts/${id}`, { method: 'DELETE' })

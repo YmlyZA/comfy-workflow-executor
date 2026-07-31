@@ -233,7 +233,8 @@ export function createComfyClient(baseUrl: string): ComfyClient {
     },
 
     async getQueueCounts() {
-      const res = await fetch(`${http}/queue`)
+      // 与 getSystemStats 同样带超时:主机页轮询,不能被吊死的连接拖住
+      const res = await fetch(`${http}/queue`, { signal: AbortSignal.timeout(3000) })
       if (!res.ok) throw new Error(`queue failed: ${res.status}`)
       const body = (await res.json()) as {
         queue_running: unknown[]

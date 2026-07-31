@@ -314,6 +314,57 @@ describe('pause({abandon})/resume(主机切换)', () => {
     expect(repo.listRunningJobs(db)).toHaveLength(0)
   })
 
+  it('重复 start() 不会起出第二个 loop(只有一条提交流)', async () => {
+    // 两个 job:单循环时第一个卡在 waitForHistory,第二个必须还没被认领
+    seed([{ prompt: 'a' }, { prompt: 'b' }])
+    comfy.historyDelayPolls = 1e9
+    const ex = makeExecutor()
+    ex.start()
+    await vi.waitFor(() => expect(comfy.submitted).toHaveLength(1))
+    ex.start() // 并发热切换下的双重启动
+    await new Promise((r) => setTimeout(r, 60))
+    expect(comfy.submitted).toHaveLength(1)
+    expect(repo.listRunningJobs(db)).toHaveLength(1)
+    // pause 能真正等停:若存在孤儿 loop,pause 后它还会继续提交
+    await ex.pause({ abandon: true })
+    await new Promise((r) => setTimeout(r, 60))
+    expect(comfy.submitted).toHaveLength(1)
+    expect(repo.listRunningJobs(db)).toHaveLength(0)
+  })
+
+  it('wait 模式:主机中途死掉时 pause() 仍能返回,job 回 pending', async () => {
+    const b = seed()
+    comfy.historyDelayPolls = 1e9
+    const ex = makeExecutor()
+    ex.start()
+    await vi.waitFor(() => expect(repo.listRunningJobs(db)).toHaveLength(1))
+    // 主机彻底死掉:getHistory 一直抛网络错
+    comfy.up = false
+    comfy.getHistory = async () => {
+      throw new Error('ECONNREFUSED')
+    }
+    await ex.pause() // 等待模式(不 abandon):必须靠连续错误计数收尾,否则永久挂起
+    const detail = repo.getBatchDetail(db, b.id)!
+    expect(detail.jobs[0]!.status).toBe('pending')
+    expect(detail.batch.status).toBe('running')
+  })
+
+  it('running 中主机短暂不可达:连续多轮 getHistory 报错仍继续等(不放弃)', async () => {
+    const b = seed()
+    const completed = comfy.nextResult!
+    let fails = 0
+    comfy.getHistory = async () => {
+      if (fails++ < 5) throw new Error('ECONNREFUSED') // 远超放弃阈值 3
+      return completed
+    }
+    const ex = makeExecutor()
+    ex.start()
+    await vi.waitFor(() =>
+      expect(repo.getBatchDetail(db, b.id)!.jobs[0]!.status).toBe('succeeded'),
+    )
+    await ex.pause()
+  })
+
   it('abandon 时 interrupt 在途中无重复提交(stop 在 interrupt 前)', async () => {
     seed()
     comfy.historyDelayPolls = 1e9

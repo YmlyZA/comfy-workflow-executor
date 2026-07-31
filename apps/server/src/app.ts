@@ -7,6 +7,7 @@ import type { Db } from './db/index.js'
 import type { ComfyClient } from './comfy/client.js'
 import { ObjectInfoCache } from './comfy/object-info-cache.js'
 import { getActiveHost } from './db/repo.js'
+import type { AsyncLock } from './host-switch.js'
 import { templateRoutes } from './routes/templates.js'
 import { batchRoutes } from './routes/batches.js'
 import { eventRoutes } from './routes/events.js'
@@ -27,6 +28,8 @@ export interface AppDeps {
   executor?: { pause(opts?: { abandon?: boolean }): Promise<void>; resume(db: Db, comfy?: ComfyClient): void } | null
   /** /object_info 缓存;由 createApp 自动初始化 */
   objectInfo?: ObjectInfoCache
+  /** 热切换串行锁(主机切换 / 改 active URL / 数据导入共用);由各路由首次使用时自动初始化 */
+  switchLock?: AsyncLock
 }
 
 export function createApp(deps: AppDeps) {

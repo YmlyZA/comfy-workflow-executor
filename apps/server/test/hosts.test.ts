@@ -80,6 +80,77 @@ describe('activate', () => {
   })
 })
 
+describe('并发切换串行化', () => {
+  /** 让 pause 阻塞在 gate 上,制造"第一个切换还没做完"的窗口 */
+  function gatedExecutor() {
+    let release!: () => void
+    const gate = new Promise<void>((r) => {
+      release = r
+    })
+    let first = true
+    deps.executor = {
+      pause: async () => {
+        calls.push('pause-start')
+        if (first) {
+          first = false
+          await gate
+        }
+        calls.push('pause-end')
+      },
+      resume: () => calls.push('resume'),
+    }
+    return release
+  }
+
+  it('两个 activate 并发时不交错(共用切换锁)', async () => {
+    repo.ensureActiveHost(db, 'http://a:8188')
+    const b = repo.createHost(db, { name: 'B', url: 'http://b:8188' })
+    const cHost = repo.createHost(db, { name: 'C', url: 'http://c:8188' })
+    const release = gatedExecutor()
+
+    const p1 = j('POST', `/${b.id}/activate`, { mode: 'wait' })
+    const p2 = j('POST', `/${cHost.id}/activate`, { mode: 'wait' })
+    await new Promise((r) => setTimeout(r, 30))
+    // 第二个请求被锁挡在临界区外:还没进入 pause
+    expect(calls).toEqual(['pause-start'])
+
+    release()
+    expect((await p1).status).toBe(200)
+    expect((await p2).status).toBe(200)
+    expect(calls).toEqual([
+      'pause-start',
+      'pause-end',
+      'resume',
+      'pause-start',
+      'pause-end',
+      'resume',
+    ])
+    expect(repo.getActiveHost(db)?.id).toBe(cHost.id)
+  }, 15000)
+
+  it('改 active 主机 URL 与 activate 并发时不交错', async () => {
+    const a = repo.ensureActiveHost(db, 'http://a:8188')
+    const b = repo.createHost(db, { name: 'B', url: 'http://b:8188' })
+    const release = gatedExecutor()
+
+    const p1 = j('PATCH', `/${a.id}`, { url: 'http://a2:8188' })
+    const p2 = j('POST', `/${b.id}/activate`, { mode: 'wait' })
+    await new Promise((r) => setTimeout(r, 30))
+    expect(calls).toEqual(['pause-start'])
+
+    release()
+    await Promise.all([p1, p2])
+    expect(calls).toEqual([
+      'pause-start',
+      'pause-end',
+      'resume',
+      'pause-start',
+      'pause-end',
+      'resume',
+    ])
+  }, 15000)
+})
+
 describe('PATCH', () => {
   it('改 active 主机 URL 触发重连;改名不触发', async () => {
     const a = repo.ensureActiveHost(db, 'http://a:8188')

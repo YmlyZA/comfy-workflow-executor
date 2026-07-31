@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type { AppDeps } from '../app.js'
 import { createComfyClient } from '../comfy/client.js'
 import * as repo from '../db/repo.js'
+import { createAsyncLock, reconnectComfy } from '../host-switch.js'
 
 const urlSchema = z
   .string()
@@ -23,21 +24,8 @@ const activateSchema = z.object({ mode: z.enum(['wait', 'interrupt']) })
 
 export function hostRoutes(deps: AppDeps) {
   const app = new Hono()
-
-  /** 表已切换后重建连接:换 client、失效节点缓存、重启 executor、广播状态 */
-  async function reconnect(host: { id: number; name: string; url: string }): Promise<void> {
-    const client = createComfyClient(host.url)
-    deps.comfy = client
-    deps.objectInfo?.invalidate()
-    deps.executor?.resume(deps.db, client)
-    const online = await client.isUp()
-    deps.events.emit('event', {
-      type: 'comfy-status',
-      online,
-      hostId: host.id,
-      hostName: host.name,
-    })
-  }
+  // 与数据导入共用同一把锁(同一个 deps 对象,谁先建谁负责初始化)
+  const lock = (deps.switchLock ??= createAsyncLock())
 
   app.get('/', (c) => c.json({ hosts: repo.listHosts(deps.db) }))
 
@@ -79,11 +67,17 @@ export function hostRoutes(deps: AppDeps) {
     const before = repo.getHost(deps.db, id)
     if (!before) return c.json({ error: 'host 不存在' }, 404)
     const urlChanged = patch.url !== undefined && patch.url !== before.url
-    // 改 active 主机的 URL = 租用 pod 换地址:等待模式重连
-    if (before.active === 1 && urlChanged) await deps.executor?.pause()
-    const host = repo.updateHost(deps.db, id, patch)!
-    if (before.active === 1 && urlChanged) await reconnect(host)
-    return c.json({ host })
+    // 不动 active 主机地址的改动(改名/改非当前主机)不触发重连
+    if (before.active !== 1 || !urlChanged) {
+      return c.json({ host: repo.updateHost(deps.db, id, patch)! })
+    }
+    // 改 active 主机的 URL = 租用 pod 换地址:等待模式重连(整段进锁,详见 host-switch.ts)
+    return await lock.run(async () => {
+      await deps.executor?.pause()
+      const host = repo.updateHost(deps.db, id, patch)!
+      await reconnectComfy(deps, host)
+      return c.json({ host })
+    })
   })
 
   app.delete('/:id', async (c) => {
@@ -98,11 +92,14 @@ export function hostRoutes(deps: AppDeps) {
     const target = repo.getHost(deps.db, id)
     if (!target) return c.json({ error: 'host 不存在' }, 404)
     if (target.active === 1) return c.json({ host: target })
-    // 先 pause 再切表:否则等待期间 executor 可能认领新 job 并盖上新主机的章
-    await deps.executor?.pause(mode === 'interrupt' ? { abandon: true } : undefined)
-    const host = repo.activateHost(deps.db, id)!
-    await reconnect(host)
-    return c.json({ host })
+    // 整段进锁:与另一次 activate / 改 URL / 数据导入互斥,避免起出两个 executor loop
+    return await lock.run(async () => {
+      // 先 pause 再切表:否则等待期间 executor 可能认领新 job 并盖上新主机的章
+      await deps.executor?.pause(mode === 'interrupt' ? { abandon: true } : undefined)
+      const host = repo.activateHost(deps.db, id)!
+      await reconnectComfy(deps, host)
+      return c.json({ host })
+    })
   })
 
   app.post('/:id/test', async (c) => {

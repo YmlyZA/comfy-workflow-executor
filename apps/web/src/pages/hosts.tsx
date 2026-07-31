@@ -69,7 +69,7 @@ export default function HostsPage() {
   const onError = (e: unknown) => setMsg(errMsg(e))
 
   const create = useMutation({
-    mutationFn: (input: { name: string; url: string; note?: string }) => createHost(input),
+    mutationFn: (input: { name: string; url: string; note?: string | null }) => createHost(input),
     onSuccess: () => {
       setCreating(false)
       invalidate()
@@ -77,8 +77,10 @@ export default function HostsPage() {
     onError,
   })
   const update = useMutation({
-    mutationFn: ({ id, ...patch }: { id: number; name?: string; url?: string; note?: string }) =>
-      updateHost(id, patch),
+    mutationFn: ({
+      id,
+      ...patch
+    }: { id: number; name?: string; url?: string; note?: string | null }) => updateHost(id, patch),
     onSuccess: () => {
       setEditing(null)
       invalidate()
@@ -249,7 +251,7 @@ function HostForm({
   title: string
   initial?: { name: string; url: string; note: string | null }
   pending: boolean
-  onSubmit: (v: { name: string; url: string; note?: string }) => void
+  onSubmit: (v: { name: string; url: string; note: string | null }) => void
   onClose: () => void
 }) {
   const [name, setName] = useState('')
@@ -289,7 +291,8 @@ function HostForm({
           <Button variant="outline" onClick={onClose}>取消</Button>
           <Button
             disabled={pending || !name.trim() || !url.trim()}
-            onClick={() => onSubmit({ name: name.trim(), url: url.trim(), note: note.trim() || undefined })}
+            // 备注清空要发 null:undefined 会被 JSON.stringify 丢键,服务端保留旧备注
+            onClick={() => onSubmit({ name: name.trim(), url: url.trim(), note: note.trim() || null })}
           >
             保存
           </Button>
