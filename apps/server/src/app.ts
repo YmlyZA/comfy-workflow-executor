@@ -6,6 +6,7 @@ import type { Config } from './config.js'
 import type { Db } from './db/index.js'
 import type { ComfyClient } from './comfy/client.js'
 import { ObjectInfoCache } from './comfy/object-info-cache.js'
+import { getActiveHost } from './db/repo.js'
 import { templateRoutes } from './routes/templates.js'
 import { batchRoutes } from './routes/batches.js'
 import { eventRoutes } from './routes/events.js'
@@ -39,9 +40,14 @@ export function createApp(deps: AppDeps) {
 
   app.use('/api/*', auth(deps.config.authToken))
 
-  app.get('/api/health', async (c) =>
-    c.json({ ok: true, comfy: deps.comfy ? await deps.comfy.isUp() : false }),
-  )
+  app.get('/api/health', async (c) => {
+    const host = getActiveHost(deps.db)
+    return c.json({
+      ok: true,
+      comfy: deps.comfy ? await deps.comfy.isUp() : false,
+      host: host ? { id: host.id, name: host.name } : null,
+    })
+  })
   app.route('/api', backupRoutes(deps))
   app.route('/api/comfy', comfyRoutes(deps))
   app.route('/api/templates', templateRoutes(deps))
