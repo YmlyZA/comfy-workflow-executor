@@ -18,23 +18,24 @@ export function batchRoutes(deps: AppDeps) {
 
   app.delete('/:id', async (c) => {
     const id = Number(c.req.param('id'))
-    // purgeGpu 需在删 DB 记录前收集 GPU 侧输出引用(按 subfolder/filename 去重)
+    // purgeGpu 需在删 DB 记录前收集 GPU 侧输出引用:文件在生成它的那台主机上,
+    // 按 job.hostId 分组(盖章前的旧 job 归当前 active 主机),每组内按 subfolder/filename 去重
     const purgeGpu = c.req.query('purgeGpu') === '1'
-    const gpuRefs: Array<{ filename: string; subfolder: string }> = []
+    const activeId = repo.getActiveHost(deps.db)?.id ?? null
+    const byHost = new Map<number | null, Map<string, { filename: string; subfolder: string }>>()
     let gpuSkipped = 0
     if (purgeGpu) {
-      const seen = new Set<string>()
       for (const job of repo.getBatchDetail(deps.db, id)?.jobs ?? []) {
         for (const out of job.outputs ?? []) {
           if (!out.gpu) {
             gpuSkipped++
             continue
           }
-          const key = `${out.gpu.subfolder}/${out.gpu.filename}`
-          if (!seen.has(key)) {
-            seen.add(key)
-            gpuRefs.push(out.gpu)
-          }
+          // active 主机的分组键归一成 null,与无盖章旧 job 合并成一次调用
+          const hostKey = job.hostId === activeId ? null : (job.hostId ?? null)
+          const group = byHost.get(hostKey) ?? new Map()
+          byHost.set(hostKey, group)
+          group.set(`${out.gpu.subfolder}/${out.gpu.filename}`, out.gpu)
         }
       }
     }
@@ -50,16 +51,24 @@ export function batchRoutes(deps: AppDeps) {
       }
     }
     let gpuPurgeFailed = false
-    if (purgeGpu && gpuRefs.length > 0) {
-      if (!deps.comfy) {
+    let gpuMissing = 0
+    for (const [hostKey, group] of byHost) {
+      // null 组 → 当前连接;其余按 hosts 表 URL 临建 client,主机已删则该组失败
+      let client = deps.comfy
+      if (hostKey !== null) {
+        const host = repo.getHost(deps.db, hostKey)
+        client = host ? (deps.comfyFactory?.(host.url) ?? null) : null
+      }
+      if (!client) {
         gpuPurgeFailed = true
-      } else {
-        try {
-          const r = await deps.comfy.cweDeleteOutputFiles(gpuRefs)
-          if (r.failed.length > 0) gpuPurgeFailed = true
-        } catch {
-          gpuPurgeFailed = true
-        }
+        continue
+      }
+      try {
+        const r = await client.cweDeleteOutputFiles([...group.values()])
+        if (r.failed.length > 0) gpuPurgeFailed = true
+        gpuMissing += r.missing
+      } catch {
+        gpuPurgeFailed = true
       }
     }
     deps.events.emit('event', { type: 'batch-updated', batchId: id, status: 'deleted' })
@@ -68,6 +77,7 @@ export function batchRoutes(deps: AppDeps) {
       ...(purgeFailed ? { purgeFailed: true } : {}),
       ...(gpuPurgeFailed ? { gpuPurgeFailed: true } : {}),
       ...(gpuSkipped > 0 ? { gpuSkipped } : {}),
+      ...(gpuMissing > 0 ? { gpuMissing } : {}),
     })
   })
 

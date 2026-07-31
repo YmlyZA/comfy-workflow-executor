@@ -38,6 +38,8 @@ export function useComfyStatusFeed(): void {
         hostId: d.hostId,
         hostName: d.hostName,
       })
+      // 主机或在线状态变化 → cwe 扩展安装状态需重探(不同主机装没装扩展不同)
+      void qc.invalidateQueries({ queryKey: ['cwe-status'] })
     })
     es.onerror = () => console.warn('SSE connection error — browser will retry')
     return () => es.close()

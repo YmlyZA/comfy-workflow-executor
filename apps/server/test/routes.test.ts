@@ -432,4 +432,87 @@ describe('DELETE /api/batches/:id purgeGpu', () => {
     })
     expect(((await res.json()) as any).gpuPurgeFailed).toBe(true)
   })
+
+  it('扩展返回 missing 时上报 gpuMissing(不再静默当成功)', async () => {
+    const { comfy, localDb, localApp } = makeComfyApp()
+    const b = seedFinished(localDb)
+    comfy.cweDeleteResult = { deleted: 0, missing: 1, failed: [] }
+    const res = await localApp.request(`/api/batches/${b.id}?purgeGpu=1`, {
+      method: 'DELETE',
+      headers: H,
+    })
+    const body = (await res.json()) as any
+    expect(body.gpuMissing).toBe(1)
+    expect(body.gpuPurgeFailed).toBeUndefined()
+  })
+
+  /** 跑在不同主机的 job:引用按 hostId 分组,发给各自主机(当前主机复用现有连接,其余按表里 URL 建临时 client) */
+  it('多主机批次:引用按执行主机分组发送', async () => {
+    const comfy = new FakeComfy()
+    const remoteFakes: Record<string, FakeComfy> = { 'http://h1:8188': new FakeComfy() }
+    const localDb = createDb(':memory:')
+    const localApp = createApp({
+      config: loadConfig({ AUTH_TOKEN: 'secret' }),
+      db: localDb,
+      comfy,
+      events: new EventEmitter(),
+      comfyFactory: (url: string) => remoteFakes[url]!,
+    })
+    const h1 = repo.ensureActiveHost(localDb, 'http://h1:8188')
+    const h2 = repo.createHost(localDb, { name: 'H2', url: 'http://h2:8188' })
+    const t = repo.createTemplate(localDb, {
+      name: 'T',
+      comfyJson: templateBody.comfyJson,
+      params: templateBody.params as any,
+    })
+    const b = repo.createBatch(localDb, t.id, { name: 'B', jobs: [{ prompt: 'a' }, { prompt: 'b' }] })
+    const c1 = repo.claimNextJob(localDb)! // 盖 h1 章
+    repo.finishJob(localDb, c1.job.id, [
+      { path: `${b.id}/0-0-a.png`, filename: '0-0-a.png', gpu: { filename: 'a.png', subfolder: '' } },
+    ])
+    repo.activateHost(localDb, h2.id)
+    const c2 = repo.claimNextJob(localDb)! // 盖 h2 章(现为 active,对应 deps.comfy)
+    repo.finishJob(localDb, c2.job.id, [
+      { path: `${b.id}/1-0-b.png`, filename: '1-0-b.png', gpu: { filename: 'b.png', subfolder: '' } },
+    ])
+    repo.markBatchCompletedIfDone(localDb, b.id)
+    const res = await localApp.request(`/api/batches/${b.id}?purgeGpu=1`, {
+      method: 'DELETE',
+      headers: H,
+    })
+    expect(res.status).toBe(200)
+    expect((await res.json()) as any).toEqual({ ok: true })
+    // h2 是当前主机 → 走 deps.comfy;h1 → 工厂按表里 URL 建 client
+    expect(comfy.cweDeleted).toEqual([[{ filename: 'b.png', subfolder: '' }]])
+    expect(remoteFakes['http://h1:8188']!.cweDeleted).toEqual([
+      [{ filename: 'a.png', subfolder: '' }],
+    ])
+    void h1
+  })
+
+  it('执行主机已被删除的分组标记 gpuPurgeFailed', async () => {
+    const { comfy, localDb, localApp } = makeComfyApp()
+    const h1 = repo.ensureActiveHost(localDb, 'http://h1:8188')
+    const h2 = repo.createHost(localDb, { name: 'H2', url: 'http://h2:8188' })
+    const t = repo.createTemplate(localDb, {
+      name: 'T',
+      comfyJson: templateBody.comfyJson,
+      params: templateBody.params as any,
+    })
+    const b = repo.createBatch(localDb, t.id, { name: 'B', jobs: [{ prompt: 'a' }] })
+    const c1 = repo.claimNextJob(localDb)! // 盖 h1 章
+    repo.finishJob(localDb, c1.job.id, [
+      { path: `${b.id}/0-0-a.png`, filename: '0-0-a.png', gpu: { filename: 'a.png', subfolder: '' } },
+    ])
+    repo.markBatchCompletedIfDone(localDb, b.id)
+    repo.activateHost(localDb, h2.id)
+    expect(repo.deleteHost(localDb, h1.id)).toBe('ok') // h1 悬挂
+    const res = await localApp.request(`/api/batches/${b.id}?purgeGpu=1`, {
+      method: 'DELETE',
+      headers: H,
+    })
+    const body = (await res.json()) as any
+    expect(body.gpuPurgeFailed).toBe(true)
+    expect(comfy.cweDeleted).toHaveLength(0) // 不会错发到当前主机
+  })
 })

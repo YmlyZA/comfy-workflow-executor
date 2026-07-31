@@ -4,7 +4,7 @@ import { ZodError } from 'zod'
 import { auth } from './auth.js'
 import type { Config } from './config.js'
 import type { Db } from './db/index.js'
-import type { ComfyClient } from './comfy/client.js'
+import { createComfyClient, type ComfyClient } from './comfy/client.js'
 import { ObjectInfoCache } from './comfy/object-info-cache.js'
 import { getActiveHost } from './db/repo.js'
 import type { AsyncLock } from './host-switch.js'
@@ -30,10 +30,13 @@ export interface AppDeps {
   objectInfo?: ObjectInfoCache
   /** 热切换串行锁(主机切换 / 改 active URL / 数据导入共用);由各路由首次使用时自动初始化 */
   switchLock?: AsyncLock
+  /** 按 URL 建 client(非当前主机的 GPU 清理用);默认真实实现,测试可注入 fake */
+  comfyFactory?: (url: string) => ComfyClient
 }
 
 export function createApp(deps: AppDeps) {
   deps.objectInfo ??= new ObjectInfoCache(() => deps.comfy)
+  deps.comfyFactory ??= createComfyClient
   const app = new Hono()
 
   app.onError((err, c) => {
