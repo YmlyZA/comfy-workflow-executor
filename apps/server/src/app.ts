@@ -5,6 +5,7 @@ import { auth } from './auth.js'
 import type { Config } from './config.js'
 import type { Db } from './db/index.js'
 import type { ComfyClient } from './comfy/client.js'
+import { ObjectInfoCache } from './comfy/object-info-cache.js'
 import { templateRoutes } from './routes/templates.js'
 import { batchRoutes } from './routes/batches.js'
 import { eventRoutes } from './routes/events.js'
@@ -21,10 +22,13 @@ export interface AppDeps {
   comfy: ComfyClient | null
   events: EventEmitter
   /** 数据导入热切换用;测试/无 GPU 场景可为 null */
-  executor?: { pause(): Promise<void>; resume(db: Db): void } | null
+  executor?: { pause(opts?: { abandon?: boolean }): Promise<void>; resume(db: Db, comfy?: ComfyClient): void } | null
+  /** /object_info 缓存;由 createApp 自动初始化 */
+  objectInfo?: ObjectInfoCache
 }
 
 export function createApp(deps: AppDeps) {
+  deps.objectInfo ??= new ObjectInfoCache(() => deps.comfy)
   const app = new Hono()
 
   app.onError((err, c) => {

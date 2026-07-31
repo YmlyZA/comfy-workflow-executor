@@ -4,7 +4,6 @@ import { isAbsolute, join } from 'node:path'
 import { Hono } from 'hono'
 import type { AppDeps } from '../app.js'
 import { ConvertError, convertGraphToApi, type GraphJson } from '../comfy/graph-convert.js'
-import { ObjectInfoCache } from '../comfy/object-info-cache.js'
 import type { ObjectInfoMap } from '../comfy/client.js'
 import { enumOptions, validateApiJson } from '../comfy/validate.js'
 import { imageSize } from 'image-size'
@@ -12,11 +11,11 @@ import { imageMime } from '../mime.js'
 
 export function comfyRoutes(deps: AppDeps) {
   const app = new Hono()
-  const cache = deps.comfy ? new ObjectInfoCache(deps.comfy) : null
+  const cache = deps.objectInfo ?? null
 
   /** 离线/未配置时返回 null,由各端点决定降级方式 */
   async function objectInfo(refresh: boolean): Promise<ObjectInfoMap | null> {
-    if (!cache) return null
+    if (!cache || !deps.comfy) return null
     try {
       return await cache.get(refresh)
     } catch {

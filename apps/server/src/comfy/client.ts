@@ -21,6 +21,11 @@ export interface ComfyWsEvent {
   data?: any
 }
 
+export interface SystemStats {
+  system?: { os?: string; comfyui_version?: string; python_version?: string }
+  devices?: Array<{ name?: string; vram_total?: number; vram_free?: number }>
+}
+
 /** GET /object_info 返回的节点定义(仅声明本项目用到的 input 部分) */
 export type ObjectInfoMap = Record<
   string,
@@ -48,6 +53,10 @@ export interface ComfyClient {
   ): Promise<{ deleted: number; missing: number; failed: string[] }>
   /** 返回断开函数。连接失败时静默重试由调用方负责。 */
   connectEvents(clientId: string, onEvent: (e: ComfyWsEvent) => void): () => void
+  /** 系统统计信息:OS/ComfyUI 版本/设备(GPU)状态 */
+  getSystemStats(): Promise<SystemStats>
+  /** 当前队列计数(running/pending) */
+  getQueueCounts(): Promise<{ running: number; pending: number }>
 }
 
 export function extractOutputRefs(entry: ComfyHistoryEntry): OutputRef[] {
@@ -215,6 +224,22 @@ export function createComfyClient(baseUrl: string): ComfyClient {
         closed = true
         socket?.close()
       }
+    },
+
+    async getSystemStats() {
+      const res = await fetch(`${http}/system_stats`, { signal: AbortSignal.timeout(3000) })
+      if (!res.ok) throw new Error(`system_stats failed: ${res.status}`)
+      return (await res.json()) as SystemStats
+    },
+
+    async getQueueCounts() {
+      const res = await fetch(`${http}/queue`)
+      if (!res.ok) throw new Error(`queue failed: ${res.status}`)
+      const body = (await res.json()) as {
+        queue_running: unknown[]
+        queue_pending: unknown[]
+      }
+      return { running: body.queue_running?.length ?? 0, pending: body.queue_pending?.length ?? 0 }
     },
   }
 }

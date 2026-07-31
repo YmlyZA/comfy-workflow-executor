@@ -1,6 +1,6 @@
 import { writeFile } from 'node:fs/promises'
 import { basename } from 'node:path'
-import type { ComfyClient, ComfyHistoryEntry, ObjectInfoMap, OutputRef } from '../src/comfy/client.js'
+import type { ComfyClient, ComfyHistoryEntry, ObjectInfoMap, OutputRef, SystemStats } from '../src/comfy/client.js'
 
 export class FakeComfy implements ComfyClient {
   up = true
@@ -24,11 +24,19 @@ export class FakeComfy implements ComfyClient {
   cwePingResult = true
   cweDeleted: Array<Array<{ filename: string; subfolder: string }>> = []
   cweDeleteResult: { deleted: number; missing: number; failed: string[] } | null = null
+  systemStats: SystemStats = {
+    system: { os: 'linux', comfyui_version: '0.3.0', python_version: '3.12' },
+    devices: [{ name: 'FakeGPU', vram_total: 8 * 1024 ** 3, vram_free: 4 * 1024 ** 3 }],
+  }
+  queueCounts = { running: 0, pending: 0 }
+  interrupts = 0
 
   async isUp() {
     return this.up
   }
-  async interrupt() {}
+  async interrupt() {
+    this.interrupts++
+  }
   async uploadImage(filePath: string) {
     this.uploads.push(filePath)
     return `uploaded-${basename(filePath)}`
@@ -74,5 +82,11 @@ export class FakeComfy implements ComfyClient {
   }
   connectEvents() {
     return () => {}
+  }
+  async getSystemStats() {
+    return this.systemStats
+  }
+  async getQueueCounts() {
+    return this.queueCounts
   }
 }
