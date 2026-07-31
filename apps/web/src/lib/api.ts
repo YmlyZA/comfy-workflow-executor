@@ -63,3 +63,61 @@ export async function importBackup(file: File): Promise<void> {
   })
   if (!res.ok) throw new Error(await res.text())
 }
+
+/** GPU 主机管理接口类型与函数 */
+
+export interface HostDto {
+  id: number
+  name: string
+  url: string
+  note: string | null
+  active: number
+  createdAt: string
+}
+
+export interface HostTestResult {
+  reachable: boolean
+  latencyMs?: number
+  cwe?: boolean
+  gpuName?: string | null
+  vramTotalMB?: number | null
+}
+
+export interface HostStatsDto {
+  online: boolean
+  gpuName?: string | null
+  vramTotalMB?: number | null
+  vramFreeMB?: number | null
+  comfyuiVersion?: string | null
+  pythonVersion?: string | null
+  os?: string | null
+  queueRunning?: number
+  queuePending?: number
+  cwe?: boolean
+}
+
+export interface HealthDto {
+  ok: boolean
+  comfy: boolean
+  host: { id: number; name: string } | null
+}
+
+export const fetchHosts = () => api<{ hosts: HostDto[] }>('/hosts')
+
+export const createHost = (input: { name: string; url: string; note?: string }) =>
+  api<{ host: HostDto }>('/hosts', { method: 'POST', body: JSON.stringify(input) })
+
+export const updateHost = (id: number, patch: { name?: string; url?: string; note?: string }) =>
+  api<{ host: HostDto }>(`/hosts/${id}`, { method: 'PATCH', body: JSON.stringify(patch) })
+
+export const deleteHost = (id: number) => api<{ ok: true }>(`/hosts/${id}`, { method: 'DELETE' })
+
+export const activateHost = (id: number, mode: 'wait' | 'interrupt') =>
+  api<{ host: HostDto }>(`/hosts/${id}/activate`, { method: 'POST', body: JSON.stringify({ mode }) })
+
+export const testHost = (id: number) =>
+  api<HostTestResult>(`/hosts/${id}/test`, { method: 'POST', body: JSON.stringify({}) })
+
+export const fetchHostStats = () => api<HostStatsDto>('/hosts/current/stats')
+
+export const fetchHealth = () => api<HealthDto>('/health')

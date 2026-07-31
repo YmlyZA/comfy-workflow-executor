@@ -1,5 +1,6 @@
 import { Link, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import { getToken } from '@/lib/api'
+import { HostStatus } from '@/components/host-status'
 import BackupPage from '@/pages/backup'
 import BatchDetailPage from '@/pages/batch-detail'
 import BatchNewPage from '@/pages/batch-new'
@@ -28,6 +29,7 @@ function RequireToken() {
         <Link to="/backup" className="text-sm hover:underline">
           数据备份
         </Link>
+        <HostStatus />
       </nav>
       <Outlet />
     </div>
