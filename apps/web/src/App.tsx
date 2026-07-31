@@ -5,6 +5,7 @@ import BackupPage from '@/pages/backup'
 import BatchDetailPage from '@/pages/batch-detail'
 import BatchNewPage from '@/pages/batch-new'
 import BatchesPage from '@/pages/batches'
+import HostsPage from '@/pages/hosts'
 import LoginPage from '@/pages/login'
 import PromptsPage from '@/pages/prompts'
 import TemplateImportPage from '@/pages/template-import'
@@ -29,6 +30,9 @@ function RequireToken() {
         <Link to="/backup" className="text-sm hover:underline">
           数据备份
         </Link>
+        <Link to="/hosts" className="text-sm hover:underline">
+          GPU 主机
+        </Link>
         <HostStatus />
       </nav>
       <Outlet />
@@ -46,6 +50,7 @@ export default function App() {
         <Route path="/templates/new" element={<TemplateImportPage />} />
         <Route path="/prompts" element={<PromptsPage />} />
         <Route path="/backup" element={<BackupPage />} />
+        <Route path="/hosts" element={<HostsPage />} />
         <Route path="/batches" element={<BatchesPage />} />
         <Route path="/batches/new" element={<BatchNewPage />} />
         <Route path="/batches/:id" element={<BatchDetailPage />} />
