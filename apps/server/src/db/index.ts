@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS jobs (
   error TEXT,
   outputs TEXT,
   started_at TEXT,
-  finished_at TEXT
+  finished_at TEXT,
+  host_id INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_batch ON jobs(batch_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
@@ -48,6 +49,14 @@ CREATE TABLE IF NOT EXISTS prompts (
   content TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS hosts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  url TEXT NOT NULL,
+  note TEXT,
+  active INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `
 
 export function createDb(path: string) {
@@ -60,6 +69,10 @@ export function createDb(path: string) {
   if (!cols.some((c) => c.name === 'sort_order')) {
     sqlite.exec(`ALTER TABLE templates ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`)
     sqlite.exec(`UPDATE templates SET sort_order = id`)
+  }
+  const jobCols = sqlite.prepare(`PRAGMA table_info(jobs)`).all() as Array<{ name: string }>
+  if (!jobCols.some((c) => c.name === 'host_id')) {
+    sqlite.exec(`ALTER TABLE jobs ADD COLUMN host_id INTEGER`)
   }
   return drizzle(sqlite, { schema })
 }

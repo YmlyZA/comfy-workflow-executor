@@ -33,6 +33,8 @@ export const jobs = sqliteTable('jobs', {
   outputs: text('outputs', { mode: 'json' }).$type<OutputFile[]>(),
   startedAt: text('started_at'),
   finishedAt: text('finished_at'),
+  /** 实际执行主机;认领时盖章。无 FK:主机删除后悬挂,展示层兜底 */
+  hostId: integer('host_id'),
 })
 
 export const inputHistory = sqliteTable('input_history', {
@@ -52,7 +54,17 @@ export const prompts = sqliteTable('prompts', {
   updatedAt: text('updated_at').notNull(),
 })
 
+export const hosts = sqliteTable('hosts', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  url: text('url').notNull(),
+  note: text('note'),
+  active: integer('active').notNull().default(0),
+  createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+})
+
 export type Template = typeof templates.$inferSelect
 export type Batch = typeof batches.$inferSelect
 export type Job = typeof jobs.$inferSelect
 export type Prompt = typeof prompts.$inferSelect
+export type Host = typeof hosts.$inferSelect
