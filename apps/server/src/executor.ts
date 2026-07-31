@@ -69,11 +69,11 @@ export class Executor {
    * abandon:放弃当前 job——对旧主机发 interrupt(失败吞掉,主机可能已死),
    * waitForHistory 察觉标志后抛 AbandonError,job 重置回 pending 由新主机重跑 */
   async pause(opts?: { abandon?: boolean }): Promise<void> {
+    this.stop()
     if (opts?.abandon) {
       this.abandonRequested = true
       await this.comfy.interrupt().catch(() => {})
     }
-    this.stop()
     await this.loopPromise
     this.loopPromise = null
     this.abandonRequested = false

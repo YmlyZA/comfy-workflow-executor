@@ -313,4 +313,30 @@ describe('pause({abandon})/resume(主机切换)', () => {
     await ex.pause({ abandon: true })
     expect(repo.listRunningJobs(db)).toHaveLength(0)
   })
+
+  it('abandon 时 interrupt 在途中无重复提交(stop 在 interrupt 前)', async () => {
+    seed()
+    comfy.historyDelayPolls = 1e9
+    let interruptResolve: (() => void) | null = null
+    const interruptPending = new Promise<void>((r) => {
+      interruptResolve = r
+    })
+    comfy.interrupt = async () => {
+      await interruptPending
+    }
+    const ex = makeExecutor()
+    ex.start()
+    await vi.waitFor(() => expect(repo.listRunningJobs(db)).toHaveLength(1))
+    expect(comfy.submitted).toHaveLength(1)
+    const pausePromise = ex.pause({ abandon: true })
+    // 给 pause 一点时间进入 interrupt 的 await
+    await new Promise((r) => setTimeout(r, 50))
+    // interrupt 还在途中,验证没有二次提交(证明 stop() 已被调用)
+    expect(comfy.submitted).toHaveLength(1)
+    // 解除 interrupt 阻塞
+    interruptResolve!()
+    await pausePromise
+    // 最终仍只有一次提交
+    expect(comfy.submitted).toHaveLength(1)
+  })
 })
