@@ -6,7 +6,9 @@ import { pipeline } from 'node:stream/promises'
 import archiver from 'archiver'
 import { Hono } from 'hono'
 import type { AppDeps } from '../app.js'
+import { createComfyClient } from '../comfy/client.js'
 import { createDb } from '../db/index.js'
+import { ensureActiveHost } from '../db/repo.js'
 import { extractZip } from '../zip.js'
 
 export function backupRoutes(deps: AppDeps) {
@@ -91,7 +93,12 @@ export function backupRoutes(deps: AppDeps) {
           await mkdir(join(dataDir, 'outputs'), { recursive: true })
           const reopened = createDb(join(dataDir, 'db.sqlite'))
           deps.db = reopened
-          deps.executor?.resume(reopened)
+          // 导入的库自带 hosts 表(或旧版库由 ensureActiveHost 补种),按其 active 主机重建连接
+          const activeHost = ensureActiveHost(reopened, deps.config.comfyUrl)
+          const client = createComfyClient(activeHost.url)
+          deps.comfy = client
+          deps.objectInfo?.invalidate()
+          deps.executor?.resume(reopened, client)
         } catch (reopenErr) {
           console.error('导入后重开数据库失败,需要重启服务', reopenErr)
         }

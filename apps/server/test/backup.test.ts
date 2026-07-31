@@ -134,6 +134,25 @@ describe('POST /api/import', () => {
     expect(resumedDb).not.toBe(oldDb)
   })
 
+  it('导入含 hosts 表的库后,按其 active 主机重建连接', async () => {
+    const tmpDbDir = mkdtempSync(join(tmpdir(), 'cwe-hosts-db-'))
+    const tmpDb = createDb(join(tmpDbDir, 'db.sqlite'))
+    repo.ensureActiveHost(tmpDb, 'http://imported:8188')
+    tmpDb.$client.pragma('wal_checkpoint(TRUNCATE)')
+    tmpDb.$client.close()
+
+    const archive = archiver('zip')
+    const chunks: Buffer[] = []
+    archive.on('data', (d: Buffer) => chunks.push(d))
+    archive.file(join(tmpDbDir, 'db.sqlite'), { name: 'db.sqlite' })
+    await archive.finalize()
+    const zip = Buffer.concat(chunks)
+
+    const res = await app.request('/api/import', { method: 'POST', headers: HZ, body: new Uint8Array(zip) })
+    expect(res.status).toBe(200)
+    expect(repo.getActiveHost(deps.db)?.url).toBe('http://imported:8188')
+  })
+
   it('合法 sqlite 但 createDb 会炸的库(templates 是视图) → 400,服务照常', async () => {
     repo.createTemplate(deps.db, { name: 'KEEP', comfyJson: {}, params: [] })
     // 构造一个 sqlite 文件:templates 名字被视图占用,CREATE TABLE IF NOT EXISTS 仍会报错

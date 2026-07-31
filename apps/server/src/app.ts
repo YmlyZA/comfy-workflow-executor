@@ -12,6 +12,7 @@ import { batchRoutes } from './routes/batches.js'
 import { eventRoutes } from './routes/events.js'
 import { downloadRoute, outputRoutes, uploadRoutes } from './routes/files.js'
 import { comfyRoutes } from './routes/comfy.js'
+import { hostRoutes } from './routes/hosts.js'
 import { inputHistoryRoutes } from './routes/input-history.js'
 import { promptRoutes } from './routes/prompts.js'
 import { thumbRoutes } from './routes/thumbs.js'
@@ -49,6 +50,7 @@ export function createApp(deps: AppDeps) {
     })
   })
   app.route('/api', backupRoutes(deps))
+  app.route('/api/hosts', hostRoutes(deps))
   app.route('/api/comfy', comfyRoutes(deps))
   app.route('/api/templates', templateRoutes(deps))
   app.route('/api/events', eventRoutes(deps))
