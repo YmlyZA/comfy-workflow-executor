@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { Hono } from 'hono'
 import { z } from 'zod'
 import type { AppDeps } from '../app.js'
+import type { ComfyClient } from '../comfy/client.js'
 import * as repo from '../db/repo.js'
 import { createAsyncLock } from '../host-switch.js'
 
@@ -13,6 +14,34 @@ const IMPORT_FRESH_MS = 60 * 60 * 1000
 const cleanSchema = z.object({
   targets: z.array(z.enum(['bak', 'thumbs', 'orphan-outputs'])).nonempty(),
 })
+
+const gpuCleanSchema = z.object({
+  hostId: z.number().int(),
+  files: z.array(z.object({ filename: z.string(), subfolder: z.string() })).min(1).max(1000),
+})
+
+type HostClient =
+  | { ok: true; host: { id: number; name: string }; client: ComfyClient }
+  | { ok: false; status: 404 | 503; error: string }
+
+/** hostId 缺省=active;非 active 主机按表里 URL 经 comfyFactory 临建 client */
+function resolveHostClient(deps: AppDeps, hostIdRaw: string | undefined): HostClient {
+  const active = repo.getActiveHost(deps.db)
+  const hostId = hostIdRaw !== undefined ? Number(hostIdRaw) : active?.id
+  const host = hostId !== undefined ? repo.getHost(deps.db, hostId) : undefined
+  if (!host) return { ok: false, status: 404, error: 'host 不存在' }
+  const client = host.id === active?.id ? deps.comfy : (deps.comfyFactory?.(host.url) ?? null)
+  if (!client) return { ok: false, status: 503, error: 'GPU 主机不可达或未安装 cwe 扩展' }
+  return { ok: true, host: { id: host.id, name: host.name }, client }
+}
+
+/** cwe v2 门禁:0 → 503,1 → 409 */
+async function requireCweV2(client: ComfyClient): Promise<{ status: 503 | 409; error: string } | null> {
+  const version = await client.cwePing()
+  if (version === 0) return { status: 503, error: 'GPU 主机不可达或未安装 cwe 扩展' }
+  if (version < 2) return { status: 409, error: '需将 cwe 扩展升级到 v2 并重启 ComfyUI' }
+  return null
+}
 
 /** 递归统计文件数与字节;路径不存在返回全零 */
 function duSync(path: string): { files: number; bytes: number } {
@@ -121,6 +150,30 @@ export function maintenanceRoutes(deps: AppDeps) {
       return out
     })
     return c.json({ results })
+  })
+
+  app.get('/gpu-orphans', async (c) => {
+    const resolved = resolveHostClient(deps, c.req.query('hostId'))
+    if (!resolved.ok) return c.json({ error: resolved.error }, resolved.status)
+    const gate = await requireCweV2(resolved.client)
+    if (gate) return c.json({ error: gate.error }, gate.status)
+    const files = await resolved.client.cweListOutputFiles()
+    const refs = repo.listAllGpuRefKeys(deps.db)
+    const orphans = files.filter((f) => !refs.has(`${f.subfolder}/${f.filename}`))
+    return c.json({
+      host: resolved.host,
+      orphans,
+      totalBytes: orphans.reduce((acc, f) => acc + f.size, 0),
+    })
+  })
+
+  app.post('/gpu-clean', async (c) => {
+    const { hostId, files } = gpuCleanSchema.parse(await c.req.json())
+    const resolved = resolveHostClient(deps, String(hostId))
+    if (!resolved.ok) return c.json({ error: resolved.error }, resolved.status)
+    const gate = await requireCweV2(resolved.client)
+    if (gate) return c.json({ error: gate.error }, gate.status)
+    return c.json(await resolved.client.cweDeleteOutputFiles(files))
   })
 
   return app

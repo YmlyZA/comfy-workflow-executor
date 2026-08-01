@@ -159,3 +159,78 @@ describe('repo.listAllGpuRefKeys', () => {
     expect(repo.listAllGpuRefKeys(db)).toEqual(new Set(['sub/a.png']))
   })
 })
+
+describe('GPU 孤儿扫描与清理', () => {
+  function fake() {
+    return deps.comfy as FakeComfy
+  }
+  function seedRefs() {
+    const t = repo.createTemplate(db, { name: 'T', comfyJson: {}, params: [] })
+    const b = repo.createBatch(db, t.id, { name: 'B', jobs: [{}] })
+    const c1 = repo.claimNextJob(db)!
+    repo.finishJob(db, c1.job.id, [
+      { path: `${b.id}/0-0-a.png`, filename: '0-0-a.png', gpu: { filename: 'a.png', subfolder: '' } },
+    ])
+  }
+
+  it('孤儿 = 列举 − 全库引用并集;默认扫当前主机', async () => {
+    repo.ensureActiveHost(db, 'http://h1:8188')
+    seedRefs()
+    fake().outputFiles = [
+      { filename: 'a.png', subfolder: '', size: 10, mtime: 1 }, // 有引用
+      { filename: 'stray.png', subfolder: '', size: 7, mtime: 2 },
+      { filename: 'x.png', subfolder: 'manual', size: 3, mtime: 3 },
+    ]
+    const res = await app.request('/api/maintenance/gpu-orphans', { headers: H })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as any
+    expect(body.host.name).toBe('默认主机')
+    expect(body.orphans.map((o: any) => o.filename).sort()).toEqual(['stray.png', 'x.png'])
+    expect(body.totalBytes).toBe(10)
+  })
+
+  it('v1 扩展 409;离线 503;主机不存在 404', async () => {
+    repo.ensureActiveHost(db, 'http://h1:8188')
+    fake().cwePingVersion = 1
+    expect((await app.request('/api/maintenance/gpu-orphans', { headers: H })).status).toBe(409)
+    fake().cwePingVersion = 0
+    expect((await app.request('/api/maintenance/gpu-orphans', { headers: H })).status).toBe(503)
+    expect(
+      (await app.request('/api/maintenance/gpu-orphans?hostId=999', { headers: H })).status,
+    ).toBe(404)
+  })
+
+  it('非 active 主机经 comfyFactory 扫描', async () => {
+    repo.ensureActiveHost(db, 'http://h1:8188')
+    const h2 = repo.createHost(db, { name: 'H2', url: 'http://h2:8188' })
+    const remote = new FakeComfy()
+    remote.outputFiles = [{ filename: 'r.png', subfolder: '', size: 4, mtime: 1 }]
+    deps.comfyFactory = () => remote
+    const res = await app.request(`/api/maintenance/gpu-orphans?hostId=${h2.id}`, { headers: H })
+    const body = (await res.json()) as any
+    expect(body.host.id).toBe(h2.id)
+    expect(body.orphans).toHaveLength(1)
+  })
+
+  it('gpu-clean 转发删除并透传结果;files 超限 400', async () => {
+    const h1 = repo.ensureActiveHost(db, 'http://h1:8188')
+    fake().cweDeleteResult = { deleted: 1, missing: 1, failed: [] }
+    const res = await app.request('/api/maintenance/gpu-clean', {
+      method: 'POST',
+      headers: H,
+      body: JSON.stringify({ hostId: h1.id, files: [{ filename: 's.png', subfolder: '' }] }),
+    })
+    expect(await res.json()).toEqual({ deleted: 1, missing: 1, failed: [] })
+    expect(fake().cweDeleted).toEqual([[{ filename: 's.png', subfolder: '' }]])
+    const big = Array.from({ length: 1001 }, (_, i) => ({ filename: `${i}.png`, subfolder: '' }))
+    expect(
+      (
+        await app.request('/api/maintenance/gpu-clean', {
+          method: 'POST',
+          headers: H,
+          body: JSON.stringify({ hostId: h1.id, files: big }),
+        })
+      ).status,
+    ).toBe(400)
+  })
+})
