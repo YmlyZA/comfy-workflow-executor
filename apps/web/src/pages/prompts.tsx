@@ -25,7 +25,6 @@ import { Textarea } from '@/components/ui/textarea'
 import { api, promptsExportUrl, errorMessage } from '@/lib/api'
 import { fetchPrompts, type PromptRow } from '@/lib/prompts'
 
-
 export default function PromptsPage() {
   const qc = useQueryClient()
   const query = useQuery({ queryKey: ['prompts'], queryFn: fetchPrompts })

@@ -32,7 +32,6 @@ import {
 } from '@/lib/api'
 import type { BatchSummaryDto } from '@/pages/batches'
 
-
 export default function HostsPage() {
   const qc = useQueryClient()
   const status = useComfyStatus()

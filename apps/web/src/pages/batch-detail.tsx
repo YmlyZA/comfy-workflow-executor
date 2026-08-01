@@ -60,10 +60,19 @@ export default function BatchDetailPage() {
     queryFn: () => api<BatchDetailDto>(`/batches/${id}`),
   })
 
+  const [actMsg, setActMsg] = useState('')
   const act = useMutation({
     mutationFn: (action: 'cancel' | 'retry-failed') =>
       api(`/batches/${id}/${action}`, { method: 'POST' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['batches'] }),
+    onSuccess: () => {
+      setActMsg('')
+      void qc.invalidateQueries({ queryKey: ['batches'] })
+    },
+    // 竞态兜底:点击瞬间 batch 已结束会收到 409,提示并刷新到真实状态
+    onError: (e) => {
+      setActMsg(errorMessage(e))
+      void qc.invalidateQueries({ queryKey: ['batches'] })
+    },
   })
 
   const [rerollMsg, setRerollMsg] = useState('')
@@ -149,6 +158,7 @@ export default function BatchDetailPage() {
         <Progress value={(done / Math.max(jobs.length, 1)) * 100} />
         <p className="text-sm text-muted-foreground">
           {done}/{jobs.length} 完成
+          {actMsg && <span className="ml-2 text-destructive">{actMsg}</span>}
         </p>
       </div>
 
