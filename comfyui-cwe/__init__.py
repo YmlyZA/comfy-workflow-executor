@@ -8,7 +8,7 @@ import folder_paths
 from aiohttp import web
 from server import PromptServer
 
-VERSION = 1
+VERSION = 2
 
 routes = PromptServer.instance.routes
 
@@ -57,6 +57,29 @@ async def cwe_delete_output_files(request):
         except OSError:
             failed.append(label)
     return web.json_response({"deleted": deleted, "missing": missing, "failed": failed})
+
+
+@routes.get("/cwe/list-output-files")
+async def cwe_list_output_files(request):
+    """递归列举 output 目录普通文件(孤儿扫描用);符号链接逃逸出根的条目跳过。"""
+    out_root = os.path.realpath(folder_paths.get_output_directory())
+    files = []
+    for dirpath, _dirnames, filenames in os.walk(out_root):
+        for name in filenames:
+            real = os.path.realpath(os.path.join(dirpath, name))
+            if not real.startswith(out_root + os.sep):
+                continue
+            if not os.path.isfile(real):
+                continue
+            st = os.stat(real)
+            sub = os.path.relpath(dirpath, out_root)
+            files.append({
+                "filename": name,
+                "subfolder": "" if sub == "." else sub,
+                "size": st.st_size,
+                "mtime": int(st.st_mtime),
+            })
+    return web.json_response({"files": files})
 
 
 NODE_CLASS_MAPPINGS = {}
