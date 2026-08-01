@@ -18,6 +18,7 @@ import { inputHistoryRoutes } from './routes/input-history.js'
 import { promptRoutes } from './routes/prompts.js'
 import { thumbRoutes } from './routes/thumbs.js'
 import { backupRoutes } from './routes/backup.js'
+import { maintenanceRoutes } from './routes/maintenance.js'
 
 export interface AppDeps {
   config: Config
@@ -57,6 +58,7 @@ export function createApp(deps: AppDeps) {
   })
   app.route('/api', backupRoutes(deps))
   app.route('/api/hosts', hostRoutes(deps))
+  app.route('/api/maintenance', maintenanceRoutes(deps))
   app.route('/api/comfy', comfyRoutes(deps))
   app.route('/api/templates', templateRoutes(deps))
   app.route('/api/events', eventRoutes(deps))

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, lt, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, isNotNull, lt, sql } from 'drizzle-orm'
 import type { CreateBatchInput, CreateTemplateInput, OutputFile, ParamValues } from '@cwe/shared'
 import type { Db } from './index.js'
 import { batches, hosts, inputHistory, jobs, prompts, templates, type Batch, type Host, type Job, type Prompt, type Template } from './schema.js'
@@ -471,4 +471,16 @@ export function importPrompts(
     }
     return { created, updated }
   })
+}
+
+/** 全库所有 job 的 GPU 输出引用键(subfolder/filename);GPU 孤儿判定用 */
+export function listAllGpuRefKeys(db: Db): Set<string> {
+  const rows = db.select({ outputs: jobs.outputs }).from(jobs).where(isNotNull(jobs.outputs)).all()
+  const keys = new Set<string>()
+  for (const row of rows) {
+    for (const out of row.outputs ?? []) {
+      if (out.gpu) keys.add(`${out.gpu.subfolder}/${out.gpu.filename}`)
+    }
+  }
+  return keys
 }
