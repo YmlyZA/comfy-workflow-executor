@@ -71,7 +71,10 @@ async def cwe_list_output_files(request):
                 continue
             if not os.path.isfile(real):
                 continue
-            st = os.stat(real)
+            try:
+                st = os.stat(real)
+            except OSError:
+                continue
             sub = os.path.relpath(dirpath, out_root)
             files.append({
                 "filename": name,
