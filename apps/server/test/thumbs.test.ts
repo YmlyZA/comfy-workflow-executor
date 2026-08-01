@@ -4,14 +4,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import sharp from 'sharp'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { createApp } from '../src/app.js'
+import { createApp, type AppDeps } from '../src/app.js'
 import { loadConfig } from '../src/config.js'
 import { createDb, type Db } from '../src/db/index.js'
 import { FakeComfy } from './fake-comfy.js'
 
 let db: Db
 let dataDir: string
-let fake: FakeComfy
+let deps: AppDeps
 let app: ReturnType<typeof createApp>
 const H = { Authorization: 'Bearer secret' }
 
@@ -31,13 +31,14 @@ beforeEach(() => {
   dataDir = mkdtempSync(join(tmpdir(), 'cwe-thumbs-'))
   mkdirSync(join(dataDir, 'uploads'), { recursive: true })
   db = createDb(':memory:')
-  fake = new FakeComfy()
-  app = createApp({
+  const fake = new FakeComfy()
+  deps = {
     config: loadConfig({ AUTH_TOKEN: 'secret', DATA_DIR: dataDir }),
     db,
     comfy: fake,
     events: new EventEmitter(),
-  })
+  }
+  app = createApp(deps)
 })
 
 describe('GET /api/thumbs (uploads 源)', () => {
@@ -94,6 +95,7 @@ describe('GET /api/thumbs (uploads 源)', () => {
 
 describe('GET /api/thumbs (comfy 源)', () => {
   it('经 comfy client 拉取并缩放,允许子目录相对名', async () => {
+    const fake = deps.comfy as FakeComfy
     fake.inputImages['sub/pic.png'] = await pngBuffer(300, 300)
     const res = await app.request(
       `/api/thumbs?source=comfy&name=${encodeURIComponent('sub/pic.png')}`,
@@ -106,6 +108,7 @@ describe('GET /api/thumbs (comfy 源)', () => {
   })
 
   it('磁盘缓存命中:GPU 侧文件消失后仍能返回', async () => {
+    const fake = deps.comfy as FakeComfy
     fake.inputImages['gone.png'] = await pngBuffer(50, 50)
     const first = await app.request('/api/thumbs?source=comfy&name=gone.png', { headers: H })
     expect(first.status).toBe(200)
@@ -165,6 +168,7 @@ describe('GET /api/thumbs (comfy 源跨主机缓存隔离)', () => {
   it('切换主机后同名文件不吃旧主机的缓存', async () => {
     const repo = await import('../src/db/repo.js')
     const h1 = repo.ensureActiveHost(db, 'http://h1:8188')
+    const fake = deps.comfy as FakeComfy
     fake.inputImages['x.png'] = await pngBuffer(400, 200)
     const r1 = await app.request('/api/thumbs?source=comfy&name=x.png', { headers: H })
     expect(r1.status).toBe(200)
@@ -182,5 +186,49 @@ describe('GET /api/thumbs (comfy 源跨主机缓存隔离)', () => {
     repo.activateHost(db, h1.id)
     const r3 = await app.request('/api/thumbs?source=comfy&name=x.png', { headers: H })
     expect((await meta(r3)).width).toBe(192)
+  })
+})
+
+describe('GET /api/thumbs (comfy-output 源)', () => {
+  it('按主机取 output 图,缓存按主机隔离,支持子目录名', async () => {
+    const repo = await import('../src/db/repo.js')
+    const h1 = repo.ensureActiveHost(db, 'http://h1:8188')
+    const fake = deps.comfy as FakeComfy
+    fake.outputImages['manual/x.png'] = await pngBuffer(400, 200)
+    const r1 = await app.request(
+      '/api/thumbs?source=comfy-output&name=' + encodeURIComponent('manual/x.png'),
+      { headers: H },
+    )
+    expect(r1.status).toBe(200)
+    expect((await meta(r1)).width).toBe(192)
+
+    // 指定另一主机:经 comfyFactory,独立缓存
+    const h2 = repo.createHost(db, { name: 'H2', url: 'http://h2:8188' })
+    const remote = new FakeComfy()
+    remote.outputImages['manual/x.png'] = await pngBuffer(100, 100)
+    deps.comfyFactory = () => remote
+    const r2 = await app.request(
+      `/api/thumbs?source=comfy-output&hostId=${h2.id}&name=${encodeURIComponent('manual/x.png')}`,
+      { headers: H },
+    )
+    expect(r2.status).toBe(200)
+    expect((await meta(r2)).width).toBe(100)
+    void h1
+  })
+
+  it('不存在 404;越界 name 400', async () => {
+    const repo = await import('../src/db/repo.js')
+    repo.ensureActiveHost(db, 'http://h1:8188')
+    expect(
+      (await app.request('/api/thumbs?source=comfy-output&name=nope.png', { headers: H })).status,
+    ).toBe(404)
+    expect(
+      (
+        await app.request(
+          '/api/thumbs?source=comfy-output&name=' + encodeURIComponent('../escape.png'),
+          { headers: H },
+        )
+      ).status,
+    ).toBe(400)
   })
 })
