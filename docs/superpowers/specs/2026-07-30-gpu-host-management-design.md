@@ -135,6 +135,16 @@ web 按惯例不写渲染测试，手动验收清单（放 PR 描述）：
 10. 导出 → 导入后主机列表与当前主机保持
 11. batch 详情能看到各 job 的执行主机
 
+## 修订（2026-07-31，多主机同类问题审计）
+
+验收后审计「假定单一/当前主机」的既有功能，修复三处、记录一处限制：
+
+- **GPU 输出清理跨主机失效（修复）**：删除 batch 的 `purgeGpu` 原先只向**当前**主机发删除，且 cwe 扩展的 `missing`（按路径找不到文件）被静默当成功——batch 跑在别的主机上时文件原地留存且无任何提示（PR #9 原生缺陷，多主机放大触发面）。改为：引用按 `job.hostId` 分组，当前主机复用现有连接，其余按 hosts 表 URL 经 `deps.comfyFactory` 临建 client 分别发送；无盖章旧 job 归当前主机；执行主机已删的分组报 `gpuPurgeFailed`；`missing` 汇总为响应新字段 `gpuMissing`，UI 明示「部分 GPU 侧文件未找到」。
+- **cwe 扩展状态跨主机陈旧（修复）**：web 的 `['cwe-status']` 查询在主机切换后不失效（30s stale 内勾选框状态错）。`useComfyStatusFeed` 收到 `comfy-status` 事件时一并 invalidate。
+- **comfy 缩略图缓存跨主机污染（修复）**：`thumbs/comfy/` 按文件名缓存，而「同名」只在同一主机内有意义，切换后会吃到旧主机的陈旧缩略图。缓存目录按当前主机 id 隔离（`thumbs/comfy/<hostId>/`）；uploads 源内容寻址不受影响。旧的未分主机缓存文件成为孤儿（thumbs 可再生、导出本就排除，无需迁移）。
+- **GPU 侧 input 引用跨主机失效（记录为限制，不修）**：image 参数引用 GPU 侧 input 文件本质上是 host-scoped——切换主机后预览 404、执行时 LoadImage 报错 → job failed（可见失败，重传本地文件即可恢复）。reroll/retry 在新主机重跑带此类引用的 job 同理。
+- 审计判定无问题的点：executor 运行中 job 恒在当前主机（认领即盖章+切换锁保证时序）、`recover()` 重启后查当前主机（导入换主机的边缘场景重置 pending 可接受）、objectInfo 缓存与 gpuUploads 已在本期处理、cancel/interrupt 发当前主机语义正确。
+
 ## 已知取舍
 
 - 探测间隔固定 5s 不可配；executor 与 monitor 双份 isUp 探测（各自 3s 超时的轻请求）可接受

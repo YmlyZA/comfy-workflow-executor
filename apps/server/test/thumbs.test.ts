@@ -160,3 +160,27 @@ describe('GET /api/thumbs (参数校验)', () => {
     expect(res.status).toBe(400)
   })
 })
+
+describe('GET /api/thumbs (comfy 源跨主机缓存隔离)', () => {
+  it('切换主机后同名文件不吃旧主机的缓存', async () => {
+    const repo = await import('../src/db/repo.js')
+    const h1 = repo.ensureActiveHost(db, 'http://h1:8188')
+    fake.inputImages['x.png'] = await pngBuffer(400, 200)
+    const r1 = await app.request('/api/thumbs?source=comfy&name=x.png', { headers: H })
+    expect(r1.status).toBe(200)
+    expect((await meta(r1)).width).toBe(192) // 400x200 → 192x96
+
+    // 切到 h2:同名文件内容不同(尺寸不同),不能返回 h1 的陈旧缩略图
+    const h2 = repo.createHost(db, { name: 'H2', url: 'http://h2:8188' })
+    repo.activateHost(db, h2.id)
+    fake.inputImages['x.png'] = await pngBuffer(100, 100)
+    const r2 = await app.request('/api/thumbs?source=comfy&name=x.png', { headers: H })
+    expect(r2.status).toBe(200)
+    expect((await meta(r2)).width).toBe(100)
+
+    // 切回 h1:命中 h1 自己的缓存(fake 已换图,若命中缓存仍是 192 宽)
+    repo.activateHost(db, h1.id)
+    const r3 = await app.request('/api/thumbs?source=comfy&name=x.png', { headers: H })
+    expect((await meta(r3)).width).toBe(192)
+  })
+})

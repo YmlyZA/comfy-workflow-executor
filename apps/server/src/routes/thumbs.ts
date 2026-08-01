@@ -5,6 +5,7 @@ import { basename, isAbsolute, join, resolve } from 'node:path'
 import { Hono } from 'hono'
 import sharp from 'sharp'
 import type { AppDeps } from '../app.js'
+import { getActiveHost } from '../db/repo.js'
 
 /** 缩略图最长边(px):网格 96px 格子 ×2 DPR */
 const THUMB_SIZE = 192
@@ -21,7 +22,12 @@ export function thumbRoutes(deps: AppDeps) {
     if (name.includes('..') || isAbsolute(name)) return c.json({ error: 'name 非法' }, 400)
     if (source === 'uploads' && basename(name) !== name) return c.json({ error: 'name 非法' }, 400)
 
-    const cacheDir = resolve(deps.config.dataDir, 'thumbs', source)
+    // comfy 源按名缓存,而"同名"只在同一台主机内有意义——缓存目录按当前主机 id 隔离,
+    // 避免切换主机后吃到旧主机的陈旧缩略图;uploads 源内容寻址,与主机无关
+    const cacheDir =
+      source === 'comfy'
+        ? resolve(deps.config.dataDir, 'thumbs', 'comfy', String(getActiveHost(deps.db)?.id ?? 0))
+        : resolve(deps.config.dataDir, 'thumbs', source)
     // encodeURIComponent 后不含路径分隔符,天然单段;前缀守卫双保险
     const cachePath = resolve(cacheDir, `${encodeURIComponent(name)}.webp`)
     if (!cachePath.startsWith(cacheDir + '/')) return c.json({ error: 'name 非法' }, 400)

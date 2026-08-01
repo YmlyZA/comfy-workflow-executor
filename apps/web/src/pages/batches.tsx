@@ -304,6 +304,7 @@ function BatchesBulkActions({
                 const purgeFailures: string[] = []
                 const gpuFailures: string[] = []
                 const gpuSkips: string[] = []
+                const gpuMisses: string[] = []
                 void run(
                   '删除',
                   () => true,
@@ -317,10 +318,12 @@ function BatchesBulkActions({
                       purgeFailed?: boolean
                       gpuPurgeFailed?: boolean
                       gpuSkipped?: number
+                      gpuMissing?: number
                     }>(`/batches/${b.id}${q ? `?${q}` : ''}`, { method: 'DELETE' })
                     if (res.purgeFailed) purgeFailures.push(b.name)
                     if (res.gpuPurgeFailed) gpuFailures.push(b.name)
                     if (res.gpuSkipped) gpuSkips.push(b.name)
+                    if (res.gpuMissing) gpuMisses.push(`${b.name}(${res.gpuMissing})`)
                   },
                   () => {
                     const parts: string[] = []
@@ -329,6 +332,10 @@ function BatchesBulkActions({
                     if (gpuFailures.length > 0) parts.push(`${gpuFailures.join('、')} GPU 侧清理失败`)
                     if (gpuSkips.length > 0)
                       parts.push(`${gpuSkips.join('、')} GPU 侧引用缺失已跳过（旧批次）`)
+                    if (gpuMisses.length > 0)
+                      parts.push(
+                        `${gpuMisses.join('、')} 部分 GPU 侧文件未找到（可能已被清理或主机已删除记录）`,
+                      )
                     return parts.length > 0 ? `；${parts.join('；')}` : ''
                   },
                 )
