@@ -313,7 +313,11 @@ export default function TemplateImportPage() {
           accept=".json,.png"
           className="w-72"
           disabled={busy}
-          onChange={(e) => e.target.files?.[0] && void onFile(e.target.files[0])}
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            if (f) void onFile(f)
+            e.target.value = '' // 重选同一文件也要触发
+          }}
         />
         <Button variant="outline" onClick={() => setPasteOpen((v) => !v)}>
           粘贴 JSON

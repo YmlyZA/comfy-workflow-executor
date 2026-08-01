@@ -23,7 +23,7 @@ import {
 } from '@/components/ui/dialog'
 import { OfflineBanner } from '@/components/offline-banner'
 import { useEvents } from '@/hooks/use-events'
-import { api, downloadUrl, outputUrl } from '@/lib/api'
+import { api, downloadUrl, errorMessage, outputUrl } from '@/lib/api'
 import { statusVariant } from '@/pages/batches'
 import type { TemplateDto } from '@/pages/templates'
 
@@ -55,7 +55,7 @@ export default function BatchDetailPage() {
   const [lightbox, setLightbox] = useState<number | null>(null)
   const qc = useQueryClient()
   const progress = useEvents()
-  const { data } = useQuery({
+  const { data, isPending, error } = useQuery({
     queryKey: ['batches', id],
     queryFn: () => api<BatchDetailDto>(`/batches/${id}`),
   })
@@ -76,18 +76,21 @@ export default function BatchDetailPage() {
       setRerollMsg(`已追加 #${r.sortOrder}`)
       void qc.invalidateQueries({ queryKey: ['batches'] })
     },
-    onError: (e) => {
-      // api() 抛的是响应原文,可能是 {"error":"..."} JSON,取其中文案
-      const raw = e instanceof Error ? e.message : ''
-      try {
-        setRerollMsg((JSON.parse(raw) as { error?: string }).error ?? '重roll失败')
-      } catch {
-        setRerollMsg(raw || '重roll失败')
-      }
-    },
+    onError: (e) => setRerollMsg(errorMessage(e, '重roll失败')),
   })
 
-  if (!data) return null
+  if (isPending) return <p className="text-sm text-muted-foreground">加载中……</p>
+  if (error || !data)
+    return (
+      <div className="space-y-3">
+        <p className="text-sm text-destructive">
+          加载失败：{errorMessage(error, 'batch 不存在或已删除')}
+        </p>
+        <Button asChild variant="outline" size="sm">
+          <Link to="/batches">返回列表</Link>
+        </Button>
+      </div>
+    )
   const { batch, template, jobs } = data
   const done = jobs.filter((j) => ['succeeded', 'failed', 'canceled'].includes(j.status)).length
   const failed = jobs.filter((j) => j.status === 'failed').length

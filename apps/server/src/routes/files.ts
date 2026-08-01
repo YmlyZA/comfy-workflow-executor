@@ -89,6 +89,7 @@ export function outputRoutes(deps: AppDeps) {
     if (!full.startsWith(root + '/')) return c.json({ error: 'invalid path' }, 400)
     const stat = statSync(full, { throwIfNoEntry: false })
     if (!stat || !stat.isFile()) return c.json({ error: 'not found' }, 404)
+    c.header('Content-Type', imageMime(full))
     const stream = Readable.toWeb(createReadStream(full)) as ReadableStream
     return c.body(stream)
   })
@@ -101,16 +102,27 @@ export function downloadRoute(deps: AppDeps) {
 
   app.get('/:id/download', (c) => {
     const id = Number(c.req.param('id'))
-    const dir = join(deps.config.dataDir, 'outputs', String(id))
     const detail = getBatchDetail(deps.db, id)
-    const zipName = detail ? `${detail.batch.name}-${id}.zip` : `batch-${id}.zip`
+    if (!detail) return c.json({ error: 'batch not found' }, 404)
+    const zipName = `${detail.batch.name}-${id}.zip`
     const archive = archiver('zip')
     archive.on('error', (err) => console.error('zip archive error', err))
     archive.on('warning', (err) => console.error('zip archive warning', err))
-    if (existsSync(dir)) archive.directory(dir, false)
+    // 按 DB outputs 清单打包而非整目录:目录里可能有孤儿文件(重跑前的旧产物等)
+    for (const job of detail.jobs) {
+      for (const out of job.outputs ?? []) {
+        const full = join(deps.config.dataDir, 'outputs', out.path)
+        if (existsSync(full)) archive.file(full, { name: out.filename })
+      }
+    }
     void archive.finalize()
+    // 中文批次名走 RFC 5987 filename*;filename 为 ASCII 兜底
+    const fallback = zipName.replace(/[^\x20-\x7e]/g, '_').replace(/"/g, "'")
     c.header('Content-Type', 'application/zip')
-    c.header('Content-Disposition', `attachment; filename="${encodeURIComponent(zipName)}"`)
+    c.header(
+      'Content-Disposition',
+      `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(zipName)}`,
+    )
     return c.body(Readable.toWeb(archive) as ReadableStream)
   })
 

@@ -28,17 +28,10 @@ import {
   updateHost,
   type HostDto,
   type HostTestResult,
+  errorMessage,
 } from '@/lib/api'
 import type { BatchSummaryDto } from '@/pages/batches'
 
-function errMsg(e: unknown): string {
-  if (!(e instanceof Error)) return '操作失败'
-  try {
-    return (JSON.parse(e.message) as { error?: string }).error ?? e.message
-  } catch {
-    return e.message
-  }
-}
 
 export default function HostsPage() {
   const qc = useQueryClient()
@@ -66,7 +59,7 @@ export default function HostsPage() {
     void qc.invalidateQueries({ queryKey: ['host-stats'] })
     void qc.invalidateQueries({ queryKey: ['comfy-status'] })
   }
-  const onError = (e: unknown) => setMsg(errMsg(e))
+  const onError = (e: unknown) => setMsg(errorMessage(e))
 
   const create = useMutation({
     mutationFn: (input: { name: string; url: string; note?: string | null }) => createHost(input),

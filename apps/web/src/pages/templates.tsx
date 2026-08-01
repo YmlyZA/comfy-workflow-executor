@@ -34,6 +34,7 @@ import { Input } from '@/components/ui/input'
 import { DataTable, SortableHeader, selectColumn } from '@/components/data-table/data-table'
 import { DragHandle } from '@/components/data-table/sortable-rows'
 import { api } from '@/lib/api'
+import { formatUtcDateTime } from '@/lib/utils'
 import { apiErrorText, runBulk, summarizeBulk } from '@/lib/bulk'
 
 export interface TemplateDto {
@@ -96,6 +97,7 @@ const columns: ColumnDef<TemplateDto, any>[] = [
     meta: { title: '创建时间' },
     header: ({ column }) => <SortableHeader column={column}>创建时间</SortableHeader>,
     enableGlobalFilter: false,
+    cell: ({ row }) => formatUtcDateTime(row.original.createdAt),
   },
   {
     id: 'actions',

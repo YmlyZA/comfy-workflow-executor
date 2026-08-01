@@ -1,11 +1,12 @@
 import { EventEmitter } from 'node:events'
-import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createApp } from '../src/app.js'
 import { loadConfig } from '../src/config.js'
 import { createDb, type Db } from '../src/db/index.js'
+import * as repo from '../src/db/repo.js'
 
 let db: Db
 let app: ReturnType<typeof createApp>
@@ -94,9 +95,10 @@ describe('uploads', () => {
 })
 
 describe('outputs static', () => {
-  it('serves an output file', async () => {
+  it('serves an output file with image Content-Type', async () => {
     const res = await app.request('/api/outputs/1/0-0-out.png', { headers: H })
     expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toBe('image/png')
     expect(await res.text()).toBe('png-bytes')
   })
 
@@ -117,22 +119,43 @@ describe('outputs static', () => {
 })
 
 describe('zip download', () => {
-  it('streams a zip with content', async () => {
-    const res = await app.request('/api/batches/1/download', { headers: H })
+  function seedBatchWithOutputs() {
+    const t = repo.createTemplate(db, { name: 'T', comfyJson: {}, params: [] })
+    const b = repo.createBatch(db, t.id, { name: '批次一', jobs: [{}] })
+    const claimed = repo.claimNextJob(db)!
+    mkdirSync(join(dataDir, 'outputs', String(b.id)), { recursive: true })
+    writeFileSync(join(dataDir, 'outputs', String(b.id), '0-0-out.png'), 'real-bytes')
+    writeFileSync(join(dataDir, 'outputs', String(b.id), 'orphan.png'), 'orphan-bytes')
+    repo.finishJob(db, claimed.job.id, [{ path: `${b.id}/0-0-out.png`, filename: '0-0-out.png' }])
+    return b
+  }
+
+  it('按 DB 清单打包:孤儿文件不进 zip,中文名走 RFC5987', async () => {
+    const b = seedBatchWithOutputs()
+    const res = await app.request(`/api/batches/${b.id}/download`, { headers: H })
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toBe('application/zip')
-    const buf = new Uint8Array(await res.arrayBuffer())
-    expect(buf.length).toBeGreaterThan(0)
+    const cd = res.headers.get('content-disposition') ?? ''
+    expect(cd).toContain(`filename*=UTF-8''${encodeURIComponent(`批次一-${b.id}.zip`)}`)
+    const buf = Buffer.from(await res.arrayBuffer())
     expect([buf[0], buf[1]]).toEqual([0x50, 0x4b]) // "PK"
+    const entryNames = buf.toString('latin1')
+    expect(entryNames).toContain('0-0-out.png')
+    expect(entryNames).not.toContain('orphan.png')
   })
 
-  it('streams a zip even when the batch output dir is missing', async () => {
-    const res = await app.request('/api/batches/999/download', { headers: H })
+  it('清单里的文件磁盘缺失时跳过,zip 照常产出', async () => {
+    const b = seedBatchWithOutputs()
+    rmSync(join(dataDir, 'outputs', String(b.id), '0-0-out.png'))
+    const res = await app.request(`/api/batches/${b.id}/download`, { headers: H })
     expect(res.status).toBe(200)
-    expect(res.headers.get('content-type')).toBe('application/zip')
-    const buf = new Uint8Array(await res.arrayBuffer())
-    expect(buf.length).toBeGreaterThan(0)
-    expect([buf[0], buf[1]]).toEqual([0x50, 0x4b]) // "PK"
+    const buf = Buffer.from(await res.arrayBuffer())
+    expect([buf[0], buf[1]]).toEqual([0x50, 0x4b])
+  })
+
+  it('batch 不存在返回 404', async () => {
+    const res = await app.request('/api/batches/999/download', { headers: H })
+    expect(res.status).toBe(404)
   })
 })
 

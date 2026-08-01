@@ -21,8 +21,23 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     window.location.href = '/login'
     throw new Error('unauthorized')
   }
-  if (!res.ok) throw new Error(await res.text())
+  if (!res.ok) throw new Error(parseApiError(await res.text()))
   return res.json() as Promise<T>
+}
+
+/** 服务端错误响应体是 {error} JSON;提取文案,非 JSON 原样返回 */
+function parseApiError(text: string): string {
+  try {
+    return (JSON.parse(text) as { error?: string }).error ?? text
+  } catch {
+    return text
+  }
+}
+
+/** 统一错误文案:api() 已解析过的直接取 message,其他兜底 */
+export function errorMessage(e: unknown, fallback = '操作失败'): string {
+  if (!(e instanceof Error) || !e.message) return fallback
+  return parseApiError(e.message)
 }
 
 /** <img>/<a> 无法带 header，用 query token */
@@ -61,7 +76,7 @@ export async function importBackup(file: File): Promise<void> {
     headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/zip' },
     body: file,
   })
-  if (!res.ok) throw new Error(await res.text())
+  if (!res.ok) throw new Error(parseApiError(await res.text()))
 }
 
 /** GPU 主机管理接口类型与函数 */

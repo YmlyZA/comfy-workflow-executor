@@ -36,6 +36,7 @@ import { OfflineBanner } from '@/components/offline-banner'
 import { useEvents } from '@/hooks/use-events'
 import { useCweStatus } from '@/hooks/use-cwe-status'
 import { api } from '@/lib/api'
+import { formatUtcDateTime } from '@/lib/utils'
 import { batchBulkActions, runBulk, summarizeBulk } from '@/lib/bulk'
 
 export interface BatchSummaryDto {
@@ -111,6 +112,7 @@ const columns: ColumnDef<BatchSummaryDto, any>[] = [
     meta: { title: '创建时间' },
     header: ({ column }) => <SortableHeader column={column}>创建时间</SortableHeader>,
     enableGlobalFilter: false,
+    cell: ({ row }) => formatUtcDateTime(row.original.createdAt),
   },
 ]
 
@@ -214,6 +216,8 @@ function BatchesBulkActions({
   const cweInstalled = cwe.data?.installed === true
   const selected = table.getFilteredSelectedRowModel().rows.map((r) => r.original)
   const actions = batchBulkActions(selected)
+  // 批量请求在途时禁用按钮,防重复点击重复执行
+  const [busy, setBusy] = useState(false)
 
   async function run(
     action: string,
@@ -221,20 +225,30 @@ function BatchesBulkActions({
     fn: (b: BatchSummaryDto) => Promise<unknown>,
     extra?: () => string,
   ) {
-    const targets = selected.filter(filter)
-    const r = await runBulk(targets, (b) => b.name, fn)
-    const mappedFailed = r.failed.map((f) => ({
-      ...f,
-      message: f.message === 'batch is running' ? '运行中，先取消再删' : f.message,
-    }))
-    let msg = summarizeBulk(action, { ok: r.ok, failed: mappedFailed })
-    if (extra) {
-      const suffix = extra()
-      if (suffix) msg += suffix
+    if (busy) return
+    setBusy(true)
+    try {
+      await runInner()
+    } finally {
+      setBusy(false)
     }
-    onDone(msg)
-    table.resetRowSelection()
-    void qc.invalidateQueries({ queryKey: ['batches'] })
+
+    async function runInner() {
+      const targets = selected.filter(filter)
+      const r = await runBulk(targets, (b) => b.name, fn)
+      const mappedFailed = r.failed.map((f) => ({
+        ...f,
+        message: f.message === 'batch is running' ? '运行中，先取消再删' : f.message,
+      }))
+      let msg = summarizeBulk(action, { ok: r.ok, failed: mappedFailed })
+      if (extra) {
+        const suffix = extra()
+        if (suffix) msg += suffix
+      }
+      onDone(msg)
+      table.resetRowSelection()
+      void qc.invalidateQueries({ queryKey: ['batches'] })
+    }
   }
 
   if (selected.length === 0) return null
@@ -243,7 +257,7 @@ function BatchesBulkActions({
       <Button
         size="sm"
         variant="outline"
-        disabled={!actions.cancel}
+        disabled={busy || !actions.cancel}
         onClick={() =>
           run(
             '取消',
@@ -257,7 +271,7 @@ function BatchesBulkActions({
       <Button
         size="sm"
         variant="outline"
-        disabled={!actions.retry}
+        disabled={busy || !actions.retry}
         onClick={() =>
           run(
             '重试',
@@ -270,7 +284,7 @@ function BatchesBulkActions({
       </Button>
       <AlertDialog onOpenChange={(open) => { if (!open) { setPurge(false); setPurgeGpu(false) } }}>
         <AlertDialogTrigger asChild>
-          <Button size="sm" variant="destructive" disabled={!actions.del}>
+          <Button size="sm" variant="destructive" disabled={busy || !actions.del}>
             删除所选（{selected.length}）
           </Button>
         </AlertDialogTrigger>

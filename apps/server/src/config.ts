@@ -13,7 +13,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     authToken = 'dev-token'
   }
   return {
-    port: Number(env.PORT ?? 8080),
+    // 显式设置的 PORT 非法时报错退出,静默回退默认值只会让人找不到服务在哪
+    port: (() => {
+      if (env.PORT === undefined) return 8080
+      const n = Number(env.PORT)
+      if (!Number.isInteger(n) || n < 1 || n > 65535) throw new Error(`PORT 非法: ${env.PORT}`)
+      return n
+    })(),
     dataDir: env.DATA_DIR ?? './data',
     comfyUrl: (env.COMFYUI_URL ?? 'http://127.0.0.1:8188').replace(/\/+$/, ''),
     authToken,

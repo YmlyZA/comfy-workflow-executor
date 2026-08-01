@@ -112,6 +112,20 @@ describe('executor', () => {
     expect(repo.getBatchDetail(db, b.id)!.jobs[0]?.status).toBe('pending')
   })
 
+  it('recover(): history 记录执行失败的 job 直接置 failed 不重跑', async () => {
+    const b = seed()
+    const claimed = repo.claimNextJob(db)!
+    repo.setJobPromptId(db, claimed.job.id, 'p-err')
+    comfy.history.set('p-err', {
+      status: { completed: false, status_str: 'error', messages: [['execution_error', {}]] },
+    })
+    await makeExecutor().recover()
+    const job = repo.getBatchDetail(db, b.id)!.jobs[0]!
+    expect(job.status).toBe('failed')
+    expect(job.error).toContain('comfyui execution error')
+    expect(repo.getBatchDetail(db, b.id)!.batch.status).toBe('completed')
+  })
+
   it('recover(): comfy down resets running jobs to pending', async () => {
     const b = seed()
     const claimed = repo.claimNextJob(db)!
