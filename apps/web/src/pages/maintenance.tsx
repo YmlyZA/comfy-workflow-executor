@@ -118,10 +118,16 @@ export default function MaintenancePage() {
   )
 }
 
+/** 单次 gpu-clean 请求上限(与服务端 zod max(1000) 对齐),全选删除时按此分片顺序调用 */
+const GPU_CLEAN_BATCH = 1000
+
 function GpuSection() {
   const [hostId, setHostId] = useState<number | undefined>(undefined)
   const [scanning, setScanning] = useState(false)
   const [scan, setScan] = useState<Awaited<ReturnType<typeof fetchGpuOrphans>> | null>(null)
+  // 扫描代次:随每次成功扫描递增,作为缩略图 key 的一部分强制 <img> 重建，
+  // 避免上次加载失败时直接写入 DOM 的 visibility:hidden 被 React 复用到新一轮扫描
+  const [scanGen, setScanGen] = useState(0)
   const [scanErr, setScanErr] = useState('')
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -139,6 +145,7 @@ function GpuSection() {
     setPicked(new Set())
     try {
       setScan(await fetchGpuOrphans(effectiveHostId))
+      setScanGen((g) => g + 1)
     } catch (e) {
       setScan(null)
       setScanErr(errorMessage(e))
@@ -148,17 +155,24 @@ function GpuSection() {
   }
 
   const remove = useMutation({
-    mutationFn: () =>
-      cleanGpuOrphans(
-        scan!.host.id,
-        scan!.orphans.filter((o) => picked.has(key(o))).map((o) => ({
-          filename: o.filename,
-          subfolder: o.subfolder,
-        })),
-      ),
+    mutationFn: async () => {
+      const targets = scan!.orphans
+        .filter((o) => picked.has(key(o)))
+        .map((o) => ({ filename: o.filename, subfolder: o.subfolder }))
+      // 孤儿数超服务端 zod max(1000) 时分片顺序请求,避免全选删除直接报 400
+      const agg = { deleted: 0, missing: 0, failed: [] as string[], skippedReferenced: 0 }
+      for (let i = 0; i < targets.length; i += GPU_CLEAN_BATCH) {
+        const r = await cleanGpuOrphans(scan!.host.id, targets.slice(i, i + GPU_CLEAN_BATCH))
+        agg.deleted += r.deleted
+        agg.missing += r.missing
+        agg.failed.push(...r.failed)
+        agg.skippedReferenced += r.skippedReferenced ?? 0
+      }
+      return agg
+    },
     onSuccess: (r) => {
       setResult(
-        `已删除 ${r.deleted} 个${r.missing > 0 ? `，${r.missing} 个已不存在` : ''}${r.failed.length > 0 ? `，${r.failed.length} 个失败` : ''}`,
+        `已删除 ${r.deleted} 个${r.missing > 0 ? `，${r.missing} 个已不存在` : ''}${r.failed.length > 0 ? `，${r.failed.length} 个失败` : ''}${r.skippedReferenced > 0 ? `，${r.skippedReferenced} 个已被引用跳过` : ''}`,
       )
       void runScan()
     },
@@ -233,6 +247,7 @@ function GpuSection() {
                 <label key={k} className="cursor-pointer space-y-1 text-xs">
                   <div className="relative">
                     <img
+                      key={scanGen}
                       src={comfyOutputThumbUrl(scan.host.id, o.subfolder ? `${o.subfolder}/${o.filename}` : o.filename)}
                       alt={o.filename}
                       loading="lazy"

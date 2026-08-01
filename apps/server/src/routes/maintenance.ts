@@ -173,7 +173,13 @@ export function maintenanceRoutes(deps: AppDeps) {
     if (!resolved.ok) return c.json({ error: resolved.error }, resolved.status)
     const gate = await requireCweV2(resolved.client)
     if (gate) return c.json({ error: gate.error }, gate.status)
-    return c.json(await resolved.client.cweDeleteOutputFiles(files))
+    // 删除前重算引用并集:扫描到删除之间可能有 job 已写盘落库,或新 job 落库了引用,
+    // 两种情况都要从待删列表里剔除,绝不删已被引用的文件
+    const refs = repo.listAllGpuRefKeys(deps.db)
+    const toDelete = files.filter((f) => !refs.has(`${f.subfolder}/${f.filename}`))
+    const skippedReferenced = files.length - toDelete.length
+    const result = await resolved.client.cweDeleteOutputFiles(toDelete)
+    return c.json(skippedReferenced > 0 ? { ...result, skippedReferenced } : result)
   })
 
   return app

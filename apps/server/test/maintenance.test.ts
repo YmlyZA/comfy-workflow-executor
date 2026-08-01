@@ -233,4 +233,36 @@ describe('GPU 孤儿扫描与清理', () => {
       ).status,
     ).toBe(400)
   })
+
+  it('gpu-clean 删除前重算引用并集,已被引用的条目不转发,skippedReferenced 计数', async () => {
+    const h1 = repo.ensureActiveHost(db, 'http://h1:8188')
+    seedRefs() // 落库引用 subfolder='' filename='a.png'
+    const res = await app.request('/api/maintenance/gpu-clean', {
+      method: 'POST',
+      headers: H,
+      body: JSON.stringify({
+        hostId: h1.id,
+        files: [
+          { filename: 'a.png', subfolder: '' }, // 已有引用,应被过滤
+          { filename: 'stray.png', subfolder: '' },
+        ],
+      }),
+    })
+    const body = (await res.json()) as any
+    expect(body.skippedReferenced).toBe(1)
+    expect(body.deleted).toBe(1)
+    // 只转发未被引用的条目
+    expect(fake().cweDeleted).toEqual([[{ filename: 'stray.png', subfolder: '' }]])
+  })
+
+  it('无被引用条目时响应不带 skippedReferenced 字段', async () => {
+    const h1 = repo.ensureActiveHost(db, 'http://h1:8188')
+    const res = await app.request('/api/maintenance/gpu-clean', {
+      method: 'POST',
+      headers: H,
+      body: JSON.stringify({ hostId: h1.id, files: [{ filename: 's.png', subfolder: '' }] }),
+    })
+    const body = (await res.json()) as any
+    expect(body.skippedReferenced).toBeUndefined()
+  })
 })

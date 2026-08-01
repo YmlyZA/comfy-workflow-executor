@@ -172,10 +172,13 @@ export const cleanGpuOrphans = (
   hostId: number,
   files: Array<{ filename: string; subfolder: string }>,
 ) =>
-  api<{ deleted: number; missing: number; failed: string[] }>('/maintenance/gpu-clean', {
-    method: 'POST',
-    body: JSON.stringify({ hostId, files }),
-  })
+  api<{ deleted: number; missing: number; failed: string[]; skippedReferenced?: number }>(
+    '/maintenance/gpu-clean',
+    {
+      method: 'POST',
+      body: JSON.stringify({ hostId, files }),
+    },
+  )
 
 export function comfyOutputThumbUrl(hostId: number, name: string): string {
   return `/api/thumbs?source=comfy-output&hostId=${hostId}&name=${encodeURIComponent(name)}&token=${encodeURIComponent(getToken())}`
