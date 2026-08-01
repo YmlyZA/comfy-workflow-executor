@@ -303,21 +303,18 @@ describe('GET /api/comfy/input-image', () => {
 })
 
 describe('GET /api/comfy/cwe-status', () => {
-  it('扩展在线返回 installed:true', async () => {
-    const res = await app.request('/api/comfy/cwe-status', { headers: H })
-    expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ installed: true })
-  })
-
-  it('cwePing false 返回 installed:false', async () => {
-    comfy.cwePingResult = false
-    const res = await app.request('/api/comfy/cwe-status', { headers: H })
-    expect(await res.json()).toEqual({ installed: false })
+  it('cwe-status 返回安装状态与版本', async () => {
+    comfy.cwePingVersion = 2
+    let body = await (await app.request('/api/comfy/cwe-status', { headers: H })).json()
+    expect(body).toEqual({ installed: true, version: 2 })
+    comfy.cwePingVersion = 0
+    body = await (await app.request('/api/comfy/cwe-status', { headers: H })).json()
+    expect(body).toEqual({ installed: false, version: 0 })
   })
 
   it('comfy 未配置返回 installed:false 而非 503', async () => {
     const res = await makeApp(false).request('/api/comfy/cwe-status', { headers: H })
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ installed: false })
+    expect(await res.json()).toEqual({ installed: false, version: 0 })
   })
 })

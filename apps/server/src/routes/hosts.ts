@@ -37,7 +37,7 @@ export function hostRoutes(deps: AppDeps) {
   app.get('/current/stats', async (c) => {
     if (!deps.comfy) return c.json({ online: false })
     try {
-      const [stats, queue, cwe] = await Promise.all([
+      const [stats, queue, cweVersion] = await Promise.all([
         deps.comfy.getSystemStats(),
         deps.comfy.getQueueCounts(),
         deps.comfy.cwePing(),
@@ -54,7 +54,7 @@ export function hostRoutes(deps: AppDeps) {
         os: stats.system?.os ?? null,
         queueRunning: queue.running,
         queuePending: queue.pending,
-        cwe,
+        cwe: cweVersion > 0,
       })
     } catch {
       return c.json({ online: false })
@@ -110,12 +110,12 @@ export function hostRoutes(deps: AppDeps) {
     try {
       const stats = await probe.getSystemStats()
       const latencyMs = Date.now() - t0
-      const cwe = await probe.cwePing()
+      const cweVersion = await probe.cwePing()
       const dev = stats.devices?.[0]
       return c.json({
         reachable: true,
         latencyMs,
-        cwe,
+        cwe: cweVersion > 0,
         gpuName: dev?.name ?? null,
         vramTotalMB: dev?.vram_total != null ? Math.round(dev.vram_total / 1048576) : null,
       })

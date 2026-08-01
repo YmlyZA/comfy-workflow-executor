@@ -45,8 +45,14 @@ export interface ComfyClient {
   getObjectInfo(): Promise<ObjectInfoMap>
   /** 拉取 ComfyUI input 目录图片字节;404 返回 null。name 支持 sub/name.png 子目录写法 */
   getInputImage(name: string): Promise<ArrayBuffer | null>
-  /** cwe 扩展是否安装(GET /cwe/ping);离线/404/异常均 false */
-  cwePing(): Promise<boolean>
+  /** cwe 扩展版本:0=未装/离线/异常,1=旧版(无 version 字段),2+=对应版本 */
+  cwePing(): Promise<number>
+  /** 列举 GPU output 目录全部文件(需扩展 v2);非 200 抛错 */
+  cweListOutputFiles(): Promise<
+    Array<{ filename: string; subfolder: string; size: number; mtime: number }>
+  >
+  /** 拉取 GPU output 图片字节;404 返回 null。name 支持 sub/name.png 子目录写法 */
+  getOutputImage(name: string): Promise<ArrayBuffer | null>
   /** 删除 GPU 侧 output 文件;扩展缺失/离线抛错,由调用方兜 gpuPurgeFailed */
   cweDeleteOutputFiles(
     refs: Array<{ filename: string; subfolder: string }>,
@@ -180,12 +186,37 @@ export function createComfyClient(baseUrl: string): ComfyClient {
     async cwePing() {
       try {
         const res = await fetch(`${http}/cwe/ping`, { signal: AbortSignal.timeout(3000) })
-        if (!res.ok) return false
-        const body = (await res.json()) as { ok?: boolean }
-        return body.ok === true
+        if (!res.ok) return 0
+        const body = (await res.json()) as { ok?: boolean; version?: number }
+        if (body.ok !== true) return 0
+        return typeof body.version === 'number' ? body.version : 1
       } catch {
-        return false
+        return 0
       }
+    },
+
+    async cweListOutputFiles() {
+      const res = await fetch(`${http}/cwe/list-output-files`, {
+        signal: AbortSignal.timeout(10_000),
+      })
+      if (!res.ok) throw new Error(`cwe list failed: ${res.status}`)
+      const body = (await res.json()) as {
+        files?: Array<{ filename: string; subfolder: string; size: number; mtime: number }>
+      }
+      return body.files ?? []
+    },
+
+    async getOutputImage(name) {
+      const idx = name.lastIndexOf('/')
+      const qs = new URLSearchParams({
+        filename: idx >= 0 ? name.slice(idx + 1) : name,
+        subfolder: idx >= 0 ? name.slice(0, idx) : '',
+        type: 'output',
+      })
+      const res = await fetch(`${http}/view?${qs}`)
+      if (res.status === 404) return null
+      if (!res.ok) throw new Error(`view failed: ${res.status}`)
+      return res.arrayBuffer()
     },
 
     async cweDeleteOutputFiles(refs) {

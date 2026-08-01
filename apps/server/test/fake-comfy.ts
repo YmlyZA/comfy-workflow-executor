@@ -21,7 +21,9 @@ export class FakeComfy implements ComfyClient {
   objectInfo: ObjectInfoMap = {}
   objectInfoCalls = 0
   inputImages: Record<string, Buffer> = {}
-  cwePingResult = true
+  cwePingVersion = 2
+  outputFiles: Array<{ filename: string; subfolder: string; size: number; mtime: number }> = []
+  outputImages: Record<string, Buffer> = {}
   cweDeleted: Array<Array<{ filename: string; subfolder: string }>> = []
   cweDeleteResult: { deleted: number; missing: number; failed: string[] } | null = null
   systemStats: SystemStats = {
@@ -74,7 +76,14 @@ export class FakeComfy implements ComfyClient {
     return buf ? (Uint8Array.from(buf).buffer as ArrayBuffer) : null
   }
   async cwePing() {
-    return this.cwePingResult
+    return this.cwePingVersion
+  }
+  async cweListOutputFiles() {
+    return this.outputFiles
+  }
+  async getOutputImage(name: string): Promise<ArrayBuffer | null> {
+    const buf = this.outputImages[name]
+    return buf ? (Uint8Array.from(buf).buffer as ArrayBuffer) : null
   }
   async cweDeleteOutputFiles(refs: Array<{ filename: string; subfolder: string }>) {
     this.cweDeleted.push(refs)

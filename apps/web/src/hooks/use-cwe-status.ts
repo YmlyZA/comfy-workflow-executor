@@ -5,7 +5,7 @@ import { api } from '@/lib/api'
 export function useCweStatus() {
   return useQuery({
     queryKey: ['cwe-status'],
-    queryFn: () => api<{ installed: boolean }>('/comfy/cwe-status'),
+    queryFn: () => api<{ installed: boolean; version: number }>('/comfy/cwe-status'),
     staleTime: 30_000,
     retry: false,
   })
