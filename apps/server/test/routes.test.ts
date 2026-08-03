@@ -433,6 +433,15 @@ describe('DELETE /api/batches/:id purgeGpu', () => {
     expect(((await res.json()) as any).gpuPurgeFailed).toBe(true)
   })
 
+  it('cancel 已结束的 batch 返回 409 且状态不被改写', async () => {
+    const { localDb, localApp } = makeComfyApp()
+    const b = seedFinished(localDb)
+    expect(repo.getBatchStatus(localDb, b.id)).toBe('completed')
+    const res = await localApp.request(`/api/batches/${b.id}/cancel`, { method: 'POST', headers: H })
+    expect(res.status).toBe(409)
+    expect(repo.getBatchStatus(localDb, b.id)).toBe('completed')
+  })
+
   it('扩展返回 missing 时上报 gpuMissing(不再静默当成功)', async () => {
     const { comfy, localDb, localApp } = makeComfyApp()
     const b = seedFinished(localDb)

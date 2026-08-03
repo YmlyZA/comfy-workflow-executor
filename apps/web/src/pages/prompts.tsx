@@ -22,17 +22,8 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { api, promptsExportUrl } from '@/lib/api'
+import { api, promptsExportUrl, errorMessage } from '@/lib/api'
 import { fetchPrompts, type PromptRow } from '@/lib/prompts'
-
-function errMsg(e: unknown): string {
-  if (!(e instanceof Error)) return '操作失败'
-  try {
-    return (JSON.parse(e.message) as { error?: string }).error ?? e.message
-  } catch {
-    return e.message
-  }
-}
 
 export default function PromptsPage() {
   const qc = useQueryClient()
@@ -64,7 +55,7 @@ export default function PromptsPage() {
       setNotice(`导入完成：新增 ${res.created}，覆盖 ${res.updated}`)
       void qc.invalidateQueries({ queryKey: ['prompts'] })
     } catch (e) {
-      setNotice(`导入失败：${errMsg(e)}`)
+      setNotice(`导入失败：${errorMessage(e)}`)
     }
   }
 
@@ -183,7 +174,7 @@ function EditDialog({
       }
       onClose(true)
     } catch (e) {
-      setError(errMsg(e))
+      setError(errorMessage(e))
       setSaving(false)
     }
   }

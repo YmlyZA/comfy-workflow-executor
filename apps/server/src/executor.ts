@@ -255,6 +255,14 @@ export class Executor {
           if (entry?.status?.completed) {
             repo.finishJob(this.db, job.id, await this.collectOutputs(job, entry))
             recovered = true
+          } else if (entry?.status?.status_str === 'error') {
+            // history 已记录执行失败:直接置 failed,重置回 pending 只会原样再错一遍
+            repo.failJob(
+              this.db,
+              job.id,
+              `comfyui execution error: ${JSON.stringify(entry.status.messages ?? []).slice(0, 500)}`,
+            )
+            recovered = true
           }
         } catch {
           /* comfy 不可达 → 走重置 */

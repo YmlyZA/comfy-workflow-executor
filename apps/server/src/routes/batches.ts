@@ -83,7 +83,12 @@ export function batchRoutes(deps: AppDeps) {
 
   app.post('/:id/cancel', async (c) => {
     const id = Number(c.req.param('id'))
-    if (!repo.getBatchDetail(deps.db, id)) return c.json({ error: 'batch not found' }, 404)
+    const detail = repo.getBatchDetail(deps.db, id)
+    if (!detail) return c.json({ error: 'batch not found' }, 404)
+    // 已结束的 batch 不可取消:否则 completed 会被无谓改写成 canceled
+    if (!['pending', 'running'].includes(detail.batch.status)) {
+      return c.json({ error: 'batch 已结束,无法取消' }, 409)
+    }
     const runningJob = repo.cancelBatch(deps.db, id)
     if (runningJob && deps.comfy) await deps.comfy.interrupt().catch(() => {})
     deps.events.emit('event', { type: 'batch-updated', batchId: id, status: 'canceled' })

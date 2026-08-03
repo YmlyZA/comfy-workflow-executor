@@ -22,6 +22,9 @@ WORKDIR /app
 COPY --from=build /out .
 COPY --from=build /repo/apps/web/dist ./public
 ENV NODE_ENV=production DATA_DIR=/data PORT=8080
+# 非 root 运行;/data 在镜像内先建好属主,新建的命名卷会继承(既有旧卷需 chown 或重建,见 PR #22 说明)
+RUN mkdir -p /data && chown node:node /data /app
+USER node
 EXPOSE 8080
 VOLUME /data
 CMD ["node", "dist/index.js"]

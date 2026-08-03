@@ -36,6 +36,16 @@ describe('loadConfig', () => {
   })
 })
 
+describe('loadConfig PORT 校验', () => {
+  it('未设置回退 8080;合法值生效;非法值报错', () => {
+    expect(loadConfig({}).port).toBe(8080)
+    expect(loadConfig({ PORT: '3000' }).port).toBe(3000)
+    expect(() => loadConfig({ PORT: 'abc' })).toThrow('PORT')
+    expect(() => loadConfig({ PORT: '0' })).toThrow('PORT')
+    expect(() => loadConfig({ PORT: '70000' })).toThrow('PORT')
+  })
+})
+
 describe('auth middleware', () => {
   it('health is public', async () => {
     const res = await testApp().request('/api/health')

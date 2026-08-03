@@ -11,16 +11,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
-import { backupExportUrl, importBackup } from '@/lib/api'
-
-function errMsg(e: unknown): string {
-  if (!(e instanceof Error)) return '操作失败'
-  try {
-    return (JSON.parse(e.message) as { error?: string }).error ?? e.message
-  } catch {
-    return e.message
-  }
-}
+import { backupExportUrl, importBackup, errorMessage } from '@/lib/api'
 
 export default function BackupPage() {
   const [pendingFile, setPendingFile] = useState<File | null>(null)
@@ -51,7 +42,7 @@ export default function BackupPage() {
       window.removeEventListener('beforeunload', unloadGuard.current)
       window.location.reload()
     } catch (e) {
-      setMsg(`导入失败：${errMsg(e)}`)
+      setMsg(`导入失败：${errorMessage(e)}`)
       setBusy(false)
     }
   }

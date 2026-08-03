@@ -1,20 +1,13 @@
 import type { BatchStatus } from '@cwe/shared'
+import { errorMessage } from '@/lib/api'
 
 export interface BulkResult {
   ok: number
   failed: Array<{ name: string; message: string }>
 }
 
-/** api() 抛出的 Error message 是响应体 JSON 文本,提取其中的 error 字段 */
-export function apiErrorText(e: unknown): string {
-  const msg = e instanceof Error ? e.message : String(e)
-  try {
-    const parsed = JSON.parse(msg) as { error?: string }
-    return parsed.error ?? msg
-  } catch {
-    return msg
-  }
-}
+/** @deprecated 改用 api.ts 的 errorMessage;保留别名避免大面积改动 */
+export const apiErrorText = errorMessage
 
 /** 并发执行,部分失败不中断其余项 */
 export async function runBulk<T>(
