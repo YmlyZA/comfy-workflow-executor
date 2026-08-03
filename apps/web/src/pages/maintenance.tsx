@@ -242,18 +242,11 @@ function GpuSection() {
               return (
                 <label key={k} className="cursor-pointer space-y-1 text-xs">
                   <div className="relative">
-                    <img
+                    <GpuOrphanThumb
                       key={scanGen}
                       src={comfyOutputThumbUrl(scan.host.id, o.subfolder ? `${o.subfolder}/${o.filename}` : o.filename)}
-                      alt={o.filename}
-                      loading="lazy"
-                      className={`aspect-square w-full rounded-md border object-cover opacity-0 transition-opacity duration-250 ${checked ? 'ring-2 ring-destructive' : ''}`}
-                      onLoad={(e) => {
-                        ;(e.target as HTMLImageElement).classList.remove('opacity-0')
-                      }}
-                      onError={(e) => {
-                        ;(e.target as HTMLImageElement).style.visibility = 'hidden'
-                      }}
+                      filename={o.filename}
+                      checked={checked}
                     />
                     <Checkbox
                       checked={checked}
@@ -304,5 +297,30 @@ function GpuSection() {
         </AlertDialogContent>
       </AlertDialog>
     </section>
+  )
+}
+
+/** 孤儿缩略图:加载态用 state 管理淡入,避免 checked 等无关 prop 变化触发 React 重设 className 把命令式清掉的 opacity-0 刷回来 */
+function GpuOrphanThumb({
+  src,
+  filename,
+  checked,
+}: {
+  src: string
+  filename: string
+  checked: boolean
+}) {
+  const [loaded, setLoaded] = useState(false)
+  return (
+    <img
+      src={src}
+      alt={filename}
+      loading="lazy"
+      className={`aspect-square w-full rounded-md border object-cover transition-opacity duration-250 ${loaded ? '' : 'opacity-0'} ${checked ? 'ring-2 ring-destructive' : ''}`}
+      onLoad={() => setLoaded(true)}
+      onError={(e) => {
+        ;(e.target as HTMLImageElement).style.visibility = 'hidden'
+      }}
+    />
   )
 }
