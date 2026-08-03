@@ -137,3 +137,49 @@ export const testHost = (id: number) =>
 export const fetchHostStats = () => api<HostStatsDto>('/hosts/current/stats')
 
 export const fetchHealth = () => api<HealthDto>('/health')
+
+/** 存储维护接口类型与函数 */
+
+export interface MaintenanceSummary {
+  bak: { count: number; bytes: number }
+  thumbs: { count: number; bytes: number }
+  orphanOutputs: { count: number; bytes: number }
+}
+
+export interface GpuOrphan {
+  filename: string
+  subfolder: string
+  size: number
+  mtime: number
+}
+
+export type MaintenanceTarget = 'bak' | 'thumbs' | 'orphan-outputs'
+
+export const fetchMaintenanceSummary = () => api<MaintenanceSummary>('/maintenance/summary')
+
+export const cleanMaintenance = (targets: MaintenanceTarget[]) =>
+  api<{ results: Record<string, { freedBytes: number; failed: string[] }>}>('/maintenance/clean', {
+    method: 'POST',
+    body: JSON.stringify({ targets }),
+  })
+
+export const fetchGpuOrphans = (hostId?: number) =>
+  api<{ host: { id: number; name: string }; orphans: GpuOrphan[]; totalBytes: number }>(
+    `/maintenance/gpu-orphans${hostId !== undefined ? `?hostId=${hostId}` : ''}`,
+  )
+
+export const cleanGpuOrphans = (
+  hostId: number,
+  files: Array<{ filename: string; subfolder: string }>,
+) =>
+  api<{ deleted: number; missing: number; failed: string[]; skippedReferenced?: number }>(
+    '/maintenance/gpu-clean',
+    {
+      method: 'POST',
+      body: JSON.stringify({ hostId, files }),
+    },
+  )
+
+export function comfyOutputThumbUrl(hostId: number, name: string): string {
+  return `/api/thumbs?source=comfy-output&hostId=${hostId}&name=${encodeURIComponent(name)}&token=${encodeURIComponent(getToken())}`
+}

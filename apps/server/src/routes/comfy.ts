@@ -115,8 +115,9 @@ export function comfyRoutes(deps: AppDeps) {
 
   /** cwe 扩展探测:未配置/离线/未安装均 installed:false(能力探测,不用 503) */
   app.get('/cwe-status', async (c) => {
-    if (!deps.comfy) return c.json({ installed: false })
-    return c.json({ installed: await deps.comfy.cwePing().catch(() => false) })
+    if (!deps.comfy) return c.json({ installed: false, version: 0 })
+    const version = await deps.comfy.cwePing().catch(() => 0)
+    return c.json({ installed: version > 0, version })
   })
 
   return app

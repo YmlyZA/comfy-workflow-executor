@@ -7,6 +7,7 @@ import BatchNewPage from '@/pages/batch-new'
 import BatchesPage from '@/pages/batches'
 import HostsPage from '@/pages/hosts'
 import LoginPage from '@/pages/login'
+import MaintenancePage from '@/pages/maintenance'
 import PromptsPage from '@/pages/prompts'
 import TemplateImportPage from '@/pages/template-import'
 import TemplatesPage from '@/pages/templates'
@@ -33,6 +34,9 @@ function RequireToken() {
         <Link to="/hosts" className="text-sm hover:underline">
           GPU 主机
         </Link>
+        <Link to="/maintenance" className="text-sm hover:underline">
+          维护
+        </Link>
         <HostStatus />
       </nav>
       <Outlet />
@@ -54,6 +58,7 @@ export default function App() {
         <Route path="/batches" element={<BatchesPage />} />
         <Route path="/batches/new" element={<BatchNewPage />} />
         <Route path="/batches/:id" element={<BatchDetailPage />} />
+        <Route path="/maintenance" element={<MaintenancePage />} />
       </Route>
     </Routes>
   )
