@@ -51,6 +51,13 @@ describe('hosts CRUD', () => {
     expect((await j('DELETE', `/${a.id}`)).status).toBe(409)
     expect((await j('DELETE', `/${b.id}`)).status).toBe(200)
   })
+
+  it('非数字 :id 返回 400', async () => {
+    repo.ensureActiveHost(db, 'http://a:8188')
+    expect((await j('PATCH', '/abc', { name: 'X' })).status).toBe(400)
+    expect((await j('DELETE', '/abc')).status).toBe(400)
+    expect((await j('POST', '/abc/activate', { mode: 'wait' })).status).toBe(400)
+  })
 })
 
 describe('activate', () => {
@@ -148,6 +155,37 @@ describe('并发切换串行化', () => {
       'pause-end',
       'resume',
     ])
+  }, 15000)
+
+  it('删除与切换串行:目标切换在途时删除排队,轮到时因已 active 被 409', async () => {
+    repo.ensureActiveHost(db, 'http://a:8188')
+    const b = repo.createHost(db, { name: 'B', url: 'http://b:8188' })
+    const release = gatedExecutor()
+    const p1 = j('POST', `/${b.id}/activate`, { mode: 'wait' })
+    await new Promise((r) => setTimeout(r, 30))
+    const p2 = j('DELETE', `/${b.id}`)
+    await new Promise((r) => setTimeout(r, 30))
+    // 删除被锁挡在切换临界区外:b 仍然存在
+    expect(repo.getHost(db, b.id)).toBeDefined()
+    release()
+    expect((await p1).status).toBe(200)
+    expect((await p2).status).toBe(409) // 排到删除时 b 已成为 active
+  }, 15000)
+
+  it('activate 排队期间目标被删除:锁内重查返回 404,不触发 pause', async () => {
+    repo.ensureActiveHost(db, 'http://a:8188')
+    const b = repo.createHost(db, { name: 'B', url: 'http://b:8188' })
+    let release!: () => void
+    const gate = new Promise<void>((r) => {
+      release = r
+    })
+    void deps.switchLock!.run(() => gate) // 占住锁,让 activate 在临界区外排队
+    const p = j('POST', `/${b.id}/activate`, { mode: 'wait' })
+    await new Promise((r) => setTimeout(r, 30))
+    repo.deleteHost(db, b.id) // 排队期间目标主机被删
+    release()
+    expect((await p).status).toBe(404)
+    expect(calls).toEqual([])
   }, 15000)
 })
 

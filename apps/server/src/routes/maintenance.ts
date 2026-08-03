@@ -1,4 +1,4 @@
-import { readdirSync, statSync } from 'node:fs'
+import { lstatSync, readdirSync, statSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Hono } from 'hono'
@@ -43,9 +43,10 @@ async function requireCweV2(client: ComfyClient): Promise<{ status: 503 | 409; e
   return null
 }
 
-/** 递归统计文件数与字节;路径不存在返回全零 */
+/** 递归统计文件数与字节;路径不存在返回全零。
+ * lstat 不跟随符号链接:防指向祖先目录的链接造成无限递归,链接本身不计数 */
 function duSync(path: string): { files: number; bytes: number } {
-  const st = statSync(path, { throwIfNoEntry: false })
+  const st = lstatSync(path, { throwIfNoEntry: false })
   if (!st) return { files: 0, bytes: 0 }
   if (st.isFile()) return { files: 1, bytes: st.size }
   if (!st.isDirectory()) return { files: 0, bytes: 0 }
@@ -84,9 +85,9 @@ export function maintenanceRoutes(deps: AppDeps) {
     }
     return entries.filter((name) => {
       if (!statSync(join(root, name), { throwIfNoEntry: false })?.isDirectory()) return false
-      const id = Number(name)
-      if (!Number.isInteger(id) || id <= 0) return true
-      return repo.getBatchStatus(deps.db, id) === undefined
+      // 目录名必须是规范十进制 id:'007'/'1e3' 这类 Number() 也能解析的一律视为孤儿
+      if (!/^[1-9]\d*$/.test(name)) return true
+      return repo.getBatchStatus(deps.db, Number(name)) === undefined
     })
   }
 
@@ -178,7 +179,11 @@ export function maintenanceRoutes(deps: AppDeps) {
     const refs = repo.listAllGpuRefKeys(deps.db)
     const toDelete = files.filter((f) => !refs.has(`${f.subfolder}/${f.filename}`))
     const skippedReferenced = files.length - toDelete.length
-    const result = await resolved.client.cweDeleteOutputFiles(toDelete)
+    // 过滤后全被引用时不再调扩展(空数组虽安全,省一次网络往返)
+    const result =
+      toDelete.length > 0
+        ? await resolved.client.cweDeleteOutputFiles(toDelete)
+        : { deleted: 0, missing: 0, failed: [] as string[] }
     return c.json(skippedReferenced > 0 ? { ...result, skippedReferenced } : result)
   })
 
