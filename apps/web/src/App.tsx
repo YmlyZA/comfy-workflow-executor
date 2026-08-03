@@ -1,6 +1,15 @@
 import { Link, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
+import { MonitorIcon, MoonIcon, SunIcon } from 'lucide-react'
 import { getToken } from '@/lib/api'
 import { HostStatus } from '@/components/host-status'
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { Button } from '@/components/ui/button'
+import { useTheme } from '@/components/theme-provider'
 import BackupPage from '@/pages/backup'
 import BatchDetailPage from '@/pages/batch-detail'
 import BatchNewPage from '@/pages/batch-new'
@@ -37,10 +46,42 @@ function RequireToken() {
         <Link to="/maintenance" className="text-sm hover:underline">
           维护
         </Link>
+        <ThemeToggle />
         <HostStatus />
       </nav>
       <Outlet />
     </div>
+  )
+}
+
+const THEME_ITEMS = [
+  { value: 'light', label: '浅色' },
+  { value: 'dark', label: '深色' },
+  { value: 'system', label: '跟随系统' },
+] as const
+
+function ThemeToggle() {
+  const { theme, resolved, setTheme } = useTheme()
+  const Icon = theme === 'system' ? MonitorIcon : resolved === 'dark' ? MoonIcon : SunIcon
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" className="ml-auto size-8" title="主题">
+          <Icon className="size-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {THEME_ITEMS.map((it) => (
+          <DropdownMenuCheckboxItem
+            key={it.value}
+            checked={theme === it.value}
+            onCheckedChange={() => setTheme(it.value)}
+          >
+            {it.label}
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 

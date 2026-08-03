@@ -12,7 +12,7 @@ export function HostStatus() {
   return (
     <Link
       to="/hosts"
-      className="ml-auto flex items-center gap-2 text-sm hover:underline"
+      className="flex items-center gap-2 text-sm hover:underline"
       title={`GPU 主机:${title}`}
     >
       <span className={cn('inline-block size-2.5 rounded-full', color)} />
