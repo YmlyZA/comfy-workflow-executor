@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2Icon } from 'lucide-react'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { toast } from 'sonner'
 import {
   AlertDialog,
@@ -47,6 +47,8 @@ export default function MaintenancePage() {
     queryKey: ['maintenance-summary'],
     queryFn: fetchMaintenanceSummary,
   })
+  // 确认按钮极快双击时 isPending 还没随渲染更新,用 ref 同步防双发
+  const cleanFiring = useRef(false)
   const clean = useMutation({
     mutationFn: (t: MaintenanceTarget) => cleanMaintenance([t]),
     onSuccess: (r, t) => {
@@ -57,6 +59,9 @@ export default function MaintenancePage() {
       void qc.invalidateQueries({ queryKey: ['maintenance-summary'] })
     },
     onError: (e) => toast.error(errorMessage(e)),
+    onSettled: () => {
+      cleanFiring.current = false
+    },
   })
 
   return (
@@ -105,7 +110,10 @@ export default function MaintenancePage() {
               onClick={() => {
                 const t = confirmTarget
                 setConfirmTarget(null)
-                if (t) clean.mutate(t)
+                if (t && !cleanFiring.current) {
+                  cleanFiring.current = true
+                  clean.mutate(t)
+                }
               }}
             >
               清理
@@ -151,6 +159,7 @@ function GpuSection() {
     }
   }
 
+  const removeFiring = useRef(false)
   const remove = useMutation({
     mutationFn: async () => {
       const targets = scan!.orphans
@@ -173,7 +182,14 @@ function GpuSection() {
       )
       void runScan()
     },
-    onError: (e) => toast.error(errorMessage(e)),
+    // 分片删除中途失败时前面的分片已删,同样要重扫刷新列表,避免陈旧条目误导二次操作
+    onError: (e) => {
+      toast.error(errorMessage(e))
+      void runScan()
+    },
+    onSettled: () => {
+      removeFiring.current = false
+    },
   })
 
   const pickedBytes = scan?.orphans.filter((o) => picked.has(key(o))).reduce((a, o) => a + o.size, 0) ?? 0
@@ -288,7 +304,10 @@ function GpuSection() {
             <AlertDialogAction
               onClick={() => {
                 setConfirmOpen(false)
-                remove.mutate()
+                if (!removeFiring.current) {
+                  removeFiring.current = true
+                  remove.mutate()
+                }
               }}
             >
               删除
