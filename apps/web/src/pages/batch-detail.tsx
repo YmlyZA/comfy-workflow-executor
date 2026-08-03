@@ -4,7 +4,6 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import type { BatchStatus, JobStatus, ParamValues } from '@cwe/shared'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -26,7 +25,7 @@ import {
 import { OfflineBanner } from '@/components/offline-banner'
 import { useEvents } from '@/hooks/use-events'
 import { api, downloadUrl, errorMessage, outputUrl } from '@/lib/api'
-import { StatusBadge, statusVariant } from '@/pages/batches'
+import { StatusBadge } from '@/pages/batches'
 import type { TemplateDto } from '@/pages/templates'
 
 export interface JobDto {

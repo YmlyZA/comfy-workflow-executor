@@ -57,13 +57,13 @@ export function HostStatus() {
 }
 
 function HostStatsCard({ enabled, online }: { enabled: boolean; online: boolean | null }) {
-  const { data } = useQuery({
+  const { data, isError } = useQuery({
     queryKey: ['host-stats'],
     queryFn: fetchHostStats,
     enabled,
     staleTime: 30_000,
   })
-  if (online === false || data?.online === false)
+  if (online === false || isError || data?.online === false)
     return <p className="text-sm text-muted-foreground">主机离线或不可达</p>
   if (!data) return <p className="text-sm text-muted-foreground">加载中…</p>
   const used =

@@ -1,4 +1,4 @@
-import { Link, Navigate, NavLink, Outlet, Route, Routes, useLocation } from 'react-router-dom'
+import { Navigate, NavLink, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import { MonitorIcon, MoonIcon, SunIcon } from 'lucide-react'
 import { Toaster } from 'sonner'
 import { getToken } from '@/lib/api'
