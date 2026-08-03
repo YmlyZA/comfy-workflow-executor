@@ -2,6 +2,7 @@ import { useQueryClient, useQuery } from '@tanstack/react-query'
 import type { ColumnDef, Table as TanstackTable } from '@tanstack/react-table'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { toast } from 'sonner'
 import type { BatchStatus } from '@cwe/shared'
 import {
   AlertDialog,
@@ -133,7 +134,6 @@ const columns: ColumnDef<BatchSummaryDto, any>[] = [
 
 export default function BatchesPage() {
   useEvents()
-  const [banner, setBanner] = useState('')
   const { data: batches = [] } = useQuery({
     queryKey: ['batches'],
     queryFn: () => api<BatchSummaryDto[]>('/batches'),
@@ -149,7 +149,6 @@ export default function BatchesPage() {
         </Button>
       </div>
       <OfflineBanner hasActiveWork={batches.some((b) => b.status === 'running' || b.status === 'pending')} />
-      {banner && <p className="text-sm text-muted-foreground">{banner}</p>}
       <DataTable
         columns={columns}
         data={batches}
@@ -157,7 +156,7 @@ export default function BatchesPage() {
         searchPlaceholder="搜索 batch 名称…"
         emptyText="还没有 batch"
         toolbarSlot={(table) => <BatchFilters table={table} templateNames={templateNames} />}
-        bulkSlot={(table) => <BatchesBulkActions table={table} onDone={setBanner} />}
+        bulkSlot={(table) => <BatchesBulkActions table={table} />}
       />
     </div>
   )
@@ -219,10 +218,8 @@ function BatchFilters({
 
 function BatchesBulkActions({
   table,
-  onDone,
 }: {
   table: TanstackTable<BatchSummaryDto>
-  onDone: (msg: string) => void
 }) {
   const qc = useQueryClient()
   const [purge, setPurge] = useState(false)
@@ -255,12 +252,14 @@ function BatchesBulkActions({
         ...f,
         message: f.message === 'batch is running' ? '运行中，先取消再删' : f.message,
       }))
-      let msg = summarizeBulk(action, { ok: r.ok, failed: mappedFailed })
-      if (extra) {
-        const suffix = extra()
-        if (suffix) msg += suffix
+      const msg = summarizeBulk(action, { ok: r.ok, failed: mappedFailed })
+      const suffix = extra?.()
+      // 全部失败(没有任何一项成功)才算操作失败;混合结果仍视为完成,附注放进 description
+      if (r.ok === 0 && mappedFailed.length > 0) {
+        toast.error(msg)
+      } else {
+        toast.success(msg, suffix ? { description: suffix } : undefined)
       }
-      onDone(msg)
       table.resetRowSelection()
       void qc.invalidateQueries({ queryKey: ['batches'] })
     }
@@ -365,7 +364,7 @@ function BatchesBulkActions({
                       parts.push(
                         `${gpuMisses.join('、')} 部分 GPU 侧文件未找到（可能已被清理或主机已删除记录）`,
                       )
-                    return parts.length > 0 ? `；${parts.join('；')}` : ''
+                    return parts.length > 0 ? parts.join('；') : ''
                   },
                 )
               }}

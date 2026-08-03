@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Loader2Icon } from 'lucide-react'
+import { toast } from 'sonner'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -47,7 +48,6 @@ export default function HostsPage() {
   })
   const hasRunning = batches.some((b) => b.status === 'running')
 
-  const [msg, setMsg] = useState('')
   const [editing, setEditing] = useState<HostDto | null>(null)
   const [creating, setCreating] = useState(false)
   const [switchTarget, setSwitchTarget] = useState<HostDto | null>(null)
@@ -58,11 +58,12 @@ export default function HostsPage() {
     void qc.invalidateQueries({ queryKey: ['host-stats'] })
     void qc.invalidateQueries({ queryKey: ['comfy-status'] })
   }
-  const onError = (e: unknown) => setMsg(errorMessage(e))
+  const onError = (e: unknown) => toast.error(errorMessage(e))
 
   const create = useMutation({
     mutationFn: (input: { name: string; url: string; note?: string | null }) => createHost(input),
     onSuccess: () => {
+      toast.success('已创建')
       setCreating(false)
       invalidate()
     },
@@ -74,16 +75,24 @@ export default function HostsPage() {
       ...patch
     }: { id: number; name?: string; url?: string; note?: string | null }) => updateHost(id, patch),
     onSuccess: () => {
+      toast.success('已保存')
       setEditing(null)
       invalidate()
     },
     onError,
   })
-  const remove = useMutation({ mutationFn: deleteHost, onSuccess: invalidate, onError })
+  const remove = useMutation({
+    mutationFn: deleteHost,
+    onSuccess: () => {
+      toast.success('已删除')
+      invalidate()
+    },
+    onError,
+  })
   const activate = useMutation({
     mutationFn: ({ id, mode }: { id: number; mode: 'wait' | 'interrupt' }) => activateHost(id, mode),
     onSuccess: () => {
-      setMsg('已切换')
+      toast.success('已切换')
       invalidate()
     },
     onError,
@@ -168,8 +177,6 @@ export default function HostsPage() {
           {hosts.length === 0 && <p className="text-sm text-muted-foreground">暂无主机</p>}
         </div>
       </section>
-
-      {msg && <p className="text-sm">{msg}</p>}
 
       {activate.isPending && (
         <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-background/80 backdrop-blur-sm">

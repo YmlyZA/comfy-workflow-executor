@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2Icon } from 'lucide-react'
 import { useState } from 'react'
+import { toast } from 'sonner'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -41,7 +42,6 @@ const LOCAL_ROWS: Array<{ key: MaintenanceTarget; title: string; desc: string }>
 
 export default function MaintenancePage() {
   const qc = useQueryClient()
-  const [msg, setMsg] = useState('')
   const [confirmTarget, setConfirmTarget] = useState<MaintenanceTarget | null>(null)
   const { data: summary } = useQuery({
     queryKey: ['maintenance-summary'],
@@ -51,12 +51,12 @@ export default function MaintenancePage() {
     mutationFn: (t: MaintenanceTarget) => cleanMaintenance([t]),
     onSuccess: (r, t) => {
       const res = r.results[t]
-      setMsg(
+      toast.success(
         `已释放 ${formatBytes(res?.freedBytes ?? 0)}${(res?.failed.length ?? 0) > 0 ? `；${res!.failed.length} 项失败` : ''}`,
       )
       void qc.invalidateQueries({ queryKey: ['maintenance-summary'] })
     },
-    onError: (e) => setMsg(errorMessage(e)),
+    onError: (e) => toast.error(errorMessage(e)),
   })
 
   return (
@@ -87,7 +87,6 @@ export default function MaintenancePage() {
             </div>
           )
         })}
-        {msg && <p className="text-sm">{msg}</p>}
       </section>
 
       <GpuSection />
@@ -131,7 +130,6 @@ function GpuSection() {
   const [scanErr, setScanErr] = useState('')
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [confirmOpen, setConfirmOpen] = useState(false)
-  const [result, setResult] = useState('')
   const { data: hostsData } = useQuery({ queryKey: ['hosts'], queryFn: fetchHosts })
   const hosts = hostsData?.hosts ?? []
   const effectiveHostId = hostId ?? hosts.find((h) => h.active === 1)?.id
@@ -141,7 +139,6 @@ function GpuSection() {
   async function runScan() {
     setScanning(true)
     setScanErr('')
-    setResult('')
     setPicked(new Set())
     try {
       setScan(await fetchGpuOrphans(effectiveHostId))
@@ -171,12 +168,12 @@ function GpuSection() {
       return agg
     },
     onSuccess: (r) => {
-      setResult(
+      toast.success(
         `已删除 ${r.deleted} 个${r.missing > 0 ? `，${r.missing} 个已不存在` : ''}${r.failed.length > 0 ? `，${r.failed.length} 个失败` : ''}${r.skippedReferenced > 0 ? `，${r.skippedReferenced} 个已被引用跳过` : ''}`,
       )
       void runScan()
     },
-    onError: (e) => setResult(errorMessage(e)),
+    onError: (e) => toast.error(errorMessage(e)),
   })
 
   const pickedBytes = scan?.orphans.filter((o) => picked.has(key(o))).reduce((a, o) => a + o.size, 0) ?? 0
@@ -209,7 +206,6 @@ function GpuSection() {
         列出 output 目录中不被任何 batch 引用的文件。你直接在 ComfyUI 跑的图也会被列出——默认不勾选，删除前请逐项确认。
       </p>
       {scanErr && <p className="text-sm text-destructive">{scanErr}</p>}
-      {result && <p className="text-sm">{result}</p>}
       {scan && (
         <div className="space-y-2">
           <div className="flex items-center gap-3 text-sm">

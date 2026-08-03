@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { DicesIcon } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useState } from 'react'
+import { toast } from 'sonner'
 import type { BatchStatus, JobStatus, ParamValues } from '@cwe/shared'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -62,32 +63,29 @@ export default function BatchDetailPage() {
     retry: false,
   })
 
-  const [actMsg, setActMsg] = useState('')
   const act = useMutation({
     mutationFn: (action: 'cancel' | 'retry-failed') =>
       api(`/batches/${id}/${action}`, { method: 'POST' }),
     onSuccess: () => {
-      setActMsg('')
       void qc.invalidateQueries({ queryKey: ['batches'] })
     },
     // 竞态兜底:点击瞬间 batch 已结束会收到 409,提示并刷新到真实状态
     onError: (e) => {
-      setActMsg(errorMessage(e))
+      toast.error(errorMessage(e))
       void qc.invalidateQueries({ queryKey: ['batches'] })
     },
   })
 
-  const [rerollMsg, setRerollMsg] = useState('')
   const reroll = useMutation({
     mutationFn: (jobId: number) =>
       api<{ jobId: number; sortOrder: number }>(`/batches/${id}/jobs/${jobId}/reroll`, {
         method: 'POST',
       }),
     onSuccess: (r) => {
-      setRerollMsg(`已追加 #${r.sortOrder}`)
+      toast.success(`已追加 #${r.sortOrder}`)
       void qc.invalidateQueries({ queryKey: ['batches'] })
     },
-    onError: (e) => setRerollMsg(errorMessage(e, '重roll失败')),
+    onError: (e) => toast.error(errorMessage(e, '重roll失败')),
   })
 
   if (isPending) return <p className="text-sm text-muted-foreground">加载中……</p>
@@ -160,7 +158,6 @@ export default function BatchDetailPage() {
         <Progress value={(done / Math.max(jobs.length, 1)) * 100} />
         <p className="text-sm text-muted-foreground">
           {done}/{jobs.length} 完成
-          {actMsg && <span className="ml-2 text-destructive">{actMsg}</span>}
         </p>
       </div>
 
@@ -206,10 +203,7 @@ export default function BatchDetailPage() {
 
       {gallery.length > 0 && (
         <div>
-          <h2 className="mb-3 font-medium">
-            结果画廊（{gallery.length}）
-            {rerollMsg && <span className="ml-2 text-xs text-muted-foreground">{rerollMsg}</span>}
-          </h2>
+          <h2 className="mb-3 font-medium">结果画廊（{gallery.length}）</h2>
           <div className="grid grid-cols-4 gap-4">
             {gallery.map(({ job, output }, i) => (
               <div key={output.path} className="group relative space-y-1">

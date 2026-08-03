@@ -1,5 +1,6 @@
 import { Link, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import { MonitorIcon, MoonIcon, SunIcon } from 'lucide-react'
+import { Toaster } from 'sonner'
 import { getToken } from '@/lib/api'
 import { HostStatus } from '@/components/host-status'
 import {
@@ -23,6 +24,7 @@ import TemplatesPage from '@/pages/templates'
 
 function RequireToken() {
   const location = useLocation()
+  const { resolved } = useTheme()
   if (!getToken()) return <Navigate to="/login" state={{ from: location }} replace />
   return (
     <div className="mx-auto max-w-6xl p-6">
@@ -50,6 +52,7 @@ function RequireToken() {
         <HostStatus />
       </nav>
       <Outlet />
+      <Toaster richColors position="bottom-right" theme={resolved} />
     </div>
   )
 }
