@@ -1,8 +1,9 @@
-import { Link, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
+import { Link, Navigate, NavLink, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import { MonitorIcon, MoonIcon, SunIcon } from 'lucide-react'
 import { Toaster } from 'sonner'
 import { getToken } from '@/lib/api'
 import { HostStatus } from '@/components/host-status'
+import { cn } from '@/lib/utils'
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -22,6 +23,14 @@ import PromptsPage from '@/pages/prompts'
 import TemplateImportPage from '@/pages/template-import'
 import TemplatesPage from '@/pages/templates'
 
+const navCls = ({ isActive }: { isActive: boolean }) =>
+  cn(
+    'relative pb-0.5 text-sm transition-colors duration-150',
+    isActive
+      ? 'font-medium text-primary after:absolute after:inset-x-0 after:-bottom-[3px] after:h-0.5 after:rounded-full after:bg-primary'
+      : 'text-muted-foreground hover:text-foreground',
+  )
+
 function RequireToken() {
   const location = useLocation()
   const { resolved } = useTheme()
@@ -30,24 +39,24 @@ function RequireToken() {
     <div className="mx-auto max-w-6xl p-6">
       <nav className="mb-6 flex items-center gap-6 border-b pb-4">
         <span className="font-semibold">Comfy Workflow Executor</span>
-        <Link to="/batches" className="text-sm hover:underline">
+        <NavLink to="/batches" className={navCls}>
           Batches
-        </Link>
-        <Link to="/templates" className="text-sm hover:underline">
+        </NavLink>
+        <NavLink to="/templates" className={navCls}>
           Templates
-        </Link>
-        <Link to="/prompts" className="text-sm hover:underline">
+        </NavLink>
+        <NavLink to="/prompts" className={navCls}>
           Prompt 库
-        </Link>
-        <Link to="/backup" className="text-sm hover:underline">
+        </NavLink>
+        <NavLink to="/backup" className={navCls}>
           数据备份
-        </Link>
-        <Link to="/hosts" className="text-sm hover:underline">
+        </NavLink>
+        <NavLink to="/hosts" className={navCls}>
           GPU 主机
-        </Link>
-        <Link to="/maintenance" className="text-sm hover:underline">
+        </NavLink>
+        <NavLink to="/maintenance" className={navCls}>
           维护
-        </Link>
+        </NavLink>
         <ThemeToggle />
         <HostStatus />
       </nav>
