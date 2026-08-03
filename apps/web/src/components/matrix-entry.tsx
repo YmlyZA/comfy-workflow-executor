@@ -81,7 +81,7 @@ export function MatrixEntry({
   }, [parsed, shared, count, onChange])
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <div>
         <p className="mb-2 text-sm font-medium">共享参数（所有任务相同，留空用模板默认）</p>
         {sharedParams.length === 0 ? (
@@ -112,6 +112,7 @@ export function MatrixEntry({
                   />
                 ) : (
                   <Input
+                    className="h-8"
                     placeholder={String(p.default ?? '')}
                     value={String(shared[p.key] ?? '')}
                     onChange={(e) => setShared((prev) => ({ ...prev, [p.key]: e.target.value }))}

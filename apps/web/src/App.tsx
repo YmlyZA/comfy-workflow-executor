@@ -1,6 +1,17 @@
-import { Link, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
+import { Navigate, NavLink, Outlet, Route, Routes, useLocation } from 'react-router-dom'
+import { MonitorIcon, MoonIcon, SunIcon } from 'lucide-react'
+import { Toaster } from 'sonner'
 import { getToken } from '@/lib/api'
 import { HostStatus } from '@/components/host-status'
+import { cn } from '@/lib/utils'
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { Button } from '@/components/ui/button'
+import { useTheme } from '@/components/theme-provider'
 import BackupPage from '@/pages/backup'
 import BatchDetailPage from '@/pages/batch-detail'
 import BatchNewPage from '@/pages/batch-new'
@@ -12,35 +23,77 @@ import PromptsPage from '@/pages/prompts'
 import TemplateImportPage from '@/pages/template-import'
 import TemplatesPage from '@/pages/templates'
 
+const navCls = ({ isActive }: { isActive: boolean }) =>
+  cn(
+    'relative pb-0.5 text-sm transition-colors duration-150',
+    isActive
+      ? 'font-medium text-primary after:absolute after:inset-x-0 after:-bottom-[3px] after:h-0.5 after:rounded-full after:bg-primary'
+      : 'text-muted-foreground hover:text-foreground',
+  )
+
 function RequireToken() {
   const location = useLocation()
+  const { resolved } = useTheme()
   if (!getToken()) return <Navigate to="/login" state={{ from: location }} replace />
   return (
     <div className="mx-auto max-w-6xl p-6">
       <nav className="mb-6 flex items-center gap-6 border-b pb-4">
         <span className="font-semibold">Comfy Workflow Executor</span>
-        <Link to="/batches" className="text-sm hover:underline">
+        <NavLink to="/batches" className={navCls}>
           Batches
-        </Link>
-        <Link to="/templates" className="text-sm hover:underline">
+        </NavLink>
+        <NavLink to="/templates" className={navCls}>
           Templates
-        </Link>
-        <Link to="/prompts" className="text-sm hover:underline">
+        </NavLink>
+        <NavLink to="/prompts" className={navCls}>
           Prompt 库
-        </Link>
-        <Link to="/backup" className="text-sm hover:underline">
+        </NavLink>
+        <NavLink to="/backup" className={navCls}>
           数据备份
-        </Link>
-        <Link to="/hosts" className="text-sm hover:underline">
+        </NavLink>
+        <NavLink to="/hosts" className={navCls}>
           GPU 主机
-        </Link>
-        <Link to="/maintenance" className="text-sm hover:underline">
+        </NavLink>
+        <NavLink to="/maintenance" className={navCls}>
           维护
-        </Link>
+        </NavLink>
+        <ThemeToggle />
         <HostStatus />
       </nav>
       <Outlet />
+      <Toaster richColors position="bottom-right" theme={resolved} />
     </div>
+  )
+}
+
+const THEME_ITEMS = [
+  { value: 'light', label: '浅色' },
+  { value: 'dark', label: '深色' },
+  { value: 'system', label: '跟随系统' },
+] as const
+
+function ThemeToggle() {
+  const { theme, resolved, setTheme } = useTheme()
+  const Icon = theme === 'system' ? MonitorIcon : resolved === 'dark' ? MoonIcon : SunIcon
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" className="ml-auto size-8" title="主题">
+          <Icon className="size-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {THEME_ITEMS.map((it) => (
+          <DropdownMenuCheckboxItem
+            key={it.value}
+            checked={theme === it.value}
+            onCheckedChange={() => setTheme(it.value)}
+          >
+            {it.label}
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 

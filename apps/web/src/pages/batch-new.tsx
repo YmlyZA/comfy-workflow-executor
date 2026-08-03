@@ -87,9 +87,9 @@ export default function BatchNewPage() {
   })
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <h1 className="text-xl font-semibold">New Batch</h1>
-      <div className="flex items-end gap-4">
+      <div className="flex items-end gap-4 rounded-lg border bg-card p-4">
         <div className="space-y-1">
           <Label>模板</Label>
           <Select value={templateId} onValueChange={(v) => { setTemplateId(v); setJobs([]); setInitialRows(undefined) }}>
@@ -132,7 +132,7 @@ export default function BatchNewPage() {
       )}
 
       {jobs.length > 0 && template && (
-        <div className="space-y-2 rounded-md border p-4">
+        <div className="space-y-3 rounded-lg border bg-card p-4">
           <p className="text-sm font-medium">预览：共 {jobs.length} 个任务（最多显示 20 行）</p>
           <Table>
             <TableHeader>
@@ -217,12 +217,12 @@ function TableEntry({
   }
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       {dimPair && imageParam && (
         <div className="flex items-center gap-2 text-sm">
           <Label>输出尺寸</Label>
           <Select value={sizeMode} onValueChange={(v) => setSizeMode(v as SizeMode)}>
-            <SelectTrigger className="h-8 w-64">
+            <SelectTrigger className="w-64">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -233,7 +233,7 @@ function TableEntry({
           </Select>
           {sizeMode === 'source' && (
             <Input
-              className="h-8 w-56"
+              className="w-56"
               type="number"
               min={8}
               placeholder="最长边上限（留空=与源图一致）"
@@ -441,7 +441,7 @@ function ImagesEntry({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {imageParams.length > 1 && (
         <div className="space-y-1">
           <Label>图片填充到哪个参数</Label>
@@ -539,6 +539,7 @@ function ImagesEntry({
                 />
               ) : (
                 <Input
+                  className="h-8"
                   placeholder={String(p.default ?? '')}
                   value={String(shared[p.key] ?? '')}
                   onChange={(e) => setShared((prev) => ({ ...prev, [p.key]: e.target.value }))}

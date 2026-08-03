@@ -21,7 +21,10 @@ export function FileThumb({
           src={cur}
           loading="lazy"
           alt=""
-          className="size-full object-cover"
+          className="size-full object-cover opacity-0 transition-opacity duration-250"
+          onLoad={(e) => {
+            ;(e.target as HTMLImageElement).classList.remove('opacity-0')
+          }}
           onError={() => setStage((s) => (s === 0 && fallback ? 1 : 2))}
         />
       )}

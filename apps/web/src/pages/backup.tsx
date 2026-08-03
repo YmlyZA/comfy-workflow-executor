@@ -1,5 +1,6 @@
 import { DownloadIcon, Loader2Icon, UploadIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,7 +17,6 @@ import { backupExportUrl, importBackup, errorMessage } from '@/lib/api'
 export default function BackupPage() {
   const [pendingFile, setPendingFile] = useState<File | null>(null)
   const [busy, setBusy] = useState(false)
-  const [msg, setMsg] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
 
   // 导入中拦截刷新/关闭:服务端正在整体替换数据,中途离开会看不到结果(切换本身在服务端继续)。
@@ -35,14 +35,13 @@ export default function BackupPage() {
 
   async function doImport(file: File) {
     setBusy(true)
-    setMsg('导入中……若有任务在运行，会先等它完成再切换')
     try {
       await importBackup(file)
-      setMsg('导入成功，即将刷新')
+      toast.success('导入成功，即将刷新')
       window.removeEventListener('beforeunload', unloadGuard.current)
       window.location.reload()
     } catch (e) {
-      setMsg(`导入失败：${errorMessage(e)}`)
+      toast.error(`导入失败：${errorMessage(e)}`)
       setBusy(false)
     }
   }
@@ -82,8 +81,6 @@ export default function BackupPage() {
           }}
         />
       </section>
-
-      {msg && <p className="text-sm">{msg}</p>}
 
       {busy && (
         <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-background/80 backdrop-blur-sm">

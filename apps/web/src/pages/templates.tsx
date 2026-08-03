@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ColumnDef, Table as TanstackTable } from '@tanstack/react-table'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { toast } from 'sonner'
 import type { ParamDef } from '@cwe/shared'
 import { MoreHorizontalIcon } from 'lucide-react'
 import {
@@ -31,6 +32,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
+import { Skeleton } from '@/components/ui/skeleton'
 import { DataTable, SortableHeader, selectColumn } from '@/components/data-table/data-table'
 import { DragHandle } from '@/components/data-table/sortable-rows'
 import { api } from '@/lib/api'
@@ -111,8 +113,7 @@ const columns: ColumnDef<TemplateDto, any>[] = [
 
 export default function TemplatesPage() {
   const qc = useQueryClient()
-  const [banner, setBanner] = useState('')
-  const { data: templates = [] } = useQuery({
+  const { data: templates = [], isPending } = useQuery({
     queryKey: ['templates'],
     queryFn: () => api<TemplateDto[]>('/templates'),
   })
@@ -134,11 +135,20 @@ export default function TemplatesPage() {
     },
     onError: (e, _ids, ctx) => {
       if (ctx?.prev) qc.setQueryData(['templates'], ctx.prev)
-      setBanner(`排序保存失败：${apiErrorText(e)}`)
+      toast.error(`排序保存失败：${apiErrorText(e)}`)
     },
-    onSuccess: () => setBanner(''),
     onSettled: () => qc.invalidateQueries({ queryKey: ['templates'] }),
   })
+
+  if (isPending)
+    return (
+      <div className="space-y-2">
+        <Skeleton className="h-8 w-48" />
+        {Array.from({ length: 5 }, (_, i) => (
+          <Skeleton key={i} className="h-10 w-full" />
+        ))}
+      </div>
+    )
 
   return (
     <div className="space-y-4">
@@ -148,7 +158,6 @@ export default function TemplatesPage() {
           <Link to="/templates/new">导入 Workflow</Link>
         </Button>
       </div>
-      {banner && <p className="text-sm text-destructive">{banner}</p>}
       <DataTable
         columns={columns}
         data={templates}
@@ -156,9 +165,7 @@ export default function TemplatesPage() {
         searchPlaceholder="搜索模板名称…"
         emptyText="还没有模板——先导入 workflow（支持 UI/API JSON 或 PNG）"
         reorder={{ onReorder: (ids) => reorderMut.mutate(ids.map(Number)) }}
-        bulkSlot={(table) => (
-          <TemplatesBulkDelete table={table} onDone={setBanner} />
-        )}
+        bulkSlot={(table) => <TemplatesBulkDelete table={table} />}
       />
     </div>
   )
@@ -166,10 +173,8 @@ export default function TemplatesPage() {
 
 function TemplatesBulkDelete({
   table,
-  onDone,
 }: {
   table: TanstackTable<TemplateDto>
-  onDone: (msg: string) => void
 }) {
   const qc = useQueryClient()
   const selected = table.getFilteredSelectedRowModel().rows.map((r) => r.original)
@@ -197,7 +202,10 @@ function TemplatesBulkDelete({
                 (t) => t.name,
                 (t) => api(`/templates/${t.id}`, { method: 'DELETE' }),
               )
-              onDone(summarizeBulk('删除', r))
+              const msg = summarizeBulk('删除', r)
+              // 全部失败(没有任何一项成功)才算操作失败;混合结果仍视为完成
+              if (r.ok === 0 && r.failed.length > 0) toast.error(msg)
+              else toast.success(msg)
               table.resetRowSelection()
               void qc.invalidateQueries({ queryKey: ['templates'] })
             }}
@@ -258,6 +266,7 @@ function RenameDialog({
     mutationFn: (next: string) =>
       api(`/templates/${t.id}`, { method: 'PATCH', body: JSON.stringify({ name: next }) }),
     onSuccess: () => {
+      toast.success('已重命名')
       void qc.invalidateQueries({ queryKey: ['templates'] })
       onOpenChange(false)
     },

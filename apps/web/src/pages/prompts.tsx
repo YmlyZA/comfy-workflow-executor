@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { DownloadIcon, PencilIcon, PlusIcon, Trash2Icon, UploadIcon } from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -32,7 +33,6 @@ export default function PromptsPage() {
     null,
   )
   const [deleting, setDeleting] = useState<PromptRow | null>(null)
-  const [notice, setNotice] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
 
   const groups = useMemo(() => {
@@ -45,24 +45,28 @@ export default function PromptsPage() {
   }, [query.data])
 
   async function handleImportFile(file: File) {
-    setNotice('')
     try {
       const parsed = JSON.parse(await file.text()) as unknown
       const res = await api<{ created: number; updated: number }>('/prompts/import', {
         method: 'POST',
         body: JSON.stringify(parsed),
       })
-      setNotice(`导入完成：新增 ${res.created}，覆盖 ${res.updated}`)
+      toast.success(`导入完成：新增 ${res.created}，覆盖 ${res.updated}`)
       void qc.invalidateQueries({ queryKey: ['prompts'] })
     } catch (e) {
-      setNotice(`导入失败：${errorMessage(e)}`)
+      toast.error(`导入失败：${errorMessage(e)}`)
     }
   }
 
   async function handleDelete(row: PromptRow) {
-    await api(`/prompts/${row.id}`, { method: 'DELETE' })
-    setDeleting(null)
-    void qc.invalidateQueries({ queryKey: ['prompts'] })
+    try {
+      await api(`/prompts/${row.id}`, { method: 'DELETE' })
+      toast.success('已删除')
+      setDeleting(null)
+      void qc.invalidateQueries({ queryKey: ['prompts'] })
+    } catch (e) {
+      toast.error(errorMessage(e))
+    }
   }
 
   return (
@@ -92,8 +96,6 @@ export default function PromptsPage() {
           }}
         />
       </div>
-
-      {notice && <p className="text-sm text-muted-foreground">{notice}</p>}
 
       {query.data?.prompts.length === 0 && (
         <p className="text-sm text-muted-foreground">
@@ -172,6 +174,7 @@ function EditDialog({
       } else {
         await api('/prompts', { method: 'POST', body: JSON.stringify({ key, content }) })
       }
+      toast.success(initial ? '已保存' : '已创建')
       onClose(true)
     } catch (e) {
       setError(errorMessage(e))

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2Icon } from 'lucide-react'
 import { useRef, useState } from 'react'
+import { toast } from 'sonner'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -41,7 +42,6 @@ const LOCAL_ROWS: Array<{ key: MaintenanceTarget; title: string; desc: string }>
 
 export default function MaintenancePage() {
   const qc = useQueryClient()
-  const [msg, setMsg] = useState('')
   const [confirmTarget, setConfirmTarget] = useState<MaintenanceTarget | null>(null)
   const { data: summary } = useQuery({
     queryKey: ['maintenance-summary'],
@@ -53,12 +53,12 @@ export default function MaintenancePage() {
     mutationFn: (t: MaintenanceTarget) => cleanMaintenance([t]),
     onSuccess: (r, t) => {
       const res = r.results[t]
-      setMsg(
+      toast.success(
         `已释放 ${formatBytes(res?.freedBytes ?? 0)}${(res?.failed.length ?? 0) > 0 ? `；${res!.failed.length} 项失败` : ''}`,
       )
       void qc.invalidateQueries({ queryKey: ['maintenance-summary'] })
     },
-    onError: (e) => setMsg(errorMessage(e)),
+    onError: (e) => toast.error(errorMessage(e)),
     onSettled: () => {
       cleanFiring.current = false
     },
@@ -92,7 +92,6 @@ export default function MaintenancePage() {
             </div>
           )
         })}
-        {msg && <p className="text-sm">{msg}</p>}
       </section>
 
       <GpuSection />
@@ -139,14 +138,12 @@ function GpuSection() {
   const [scanErr, setScanErr] = useState('')
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [confirmOpen, setConfirmOpen] = useState(false)
-  const [result, setResult] = useState('')
   const { data: hostsData } = useQuery({ queryKey: ['hosts'], queryFn: fetchHosts })
   const hosts = hostsData?.hosts ?? []
   const effectiveHostId = hostId ?? hosts.find((h) => h.active === 1)?.id
 
   const key = (o: GpuOrphan) => `${o.subfolder}/${o.filename}`
 
-  // 不在这里清 result:删除后的自动重扫要保留结果反馈,手动扫描由按钮侧清
   async function runScan() {
     setScanning(true)
     setScanErr('')
@@ -180,14 +177,14 @@ function GpuSection() {
       return agg
     },
     onSuccess: (r) => {
-      setResult(
+      toast.success(
         `已删除 ${r.deleted} 个${r.missing > 0 ? `，${r.missing} 个已不存在` : ''}${r.failed.length > 0 ? `，${r.failed.length} 个失败` : ''}${r.skippedReferenced > 0 ? `，${r.skippedReferenced} 个已被引用跳过` : ''}`,
       )
       void runScan()
     },
     // 分片删除中途失败时前面的分片已删,同样要重扫刷新列表,避免陈旧条目误导二次操作
     onError: (e) => {
-      setResult(errorMessage(e))
+      toast.error(errorMessage(e))
       void runScan()
     },
     onSettled: () => {
@@ -217,14 +214,7 @@ function GpuSection() {
             ))}
           </SelectContent>
         </Select>
-        <Button
-          size="sm"
-          disabled={scanning || effectiveHostId === undefined}
-          onClick={() => {
-            setResult('')
-            void runScan()
-          }}
-        >
+        <Button size="sm" disabled={scanning || effectiveHostId === undefined} onClick={() => void runScan()}>
           {scanning ? <Loader2Icon className="size-4 animate-spin" /> : '扫描'}
         </Button>
       </div>
@@ -232,7 +222,6 @@ function GpuSection() {
         列出 output 目录中不被任何 batch 引用的文件。你直接在 ComfyUI 跑的图也会被列出——默认不勾选，删除前请逐项确认。
       </p>
       {scanErr && <p className="text-sm text-destructive">{scanErr}</p>}
-      {result && <p className="text-sm">{result}</p>}
       {scan && (
         <div className="space-y-2">
           <div className="flex items-center gap-3 text-sm">
@@ -269,15 +258,11 @@ function GpuSection() {
               return (
                 <label key={k} className="cursor-pointer space-y-1 text-xs">
                   <div className="relative">
-                    <img
+                    <GpuOrphanThumb
                       key={scanGen}
                       src={comfyOutputThumbUrl(scan.host.id, o.subfolder ? `${o.subfolder}/${o.filename}` : o.filename)}
-                      alt={o.filename}
-                      loading="lazy"
-                      className={`aspect-square w-full rounded-md border object-cover ${checked ? 'ring-2 ring-destructive' : ''}`}
-                      onError={(e) => {
-                        ;(e.target as HTMLImageElement).style.visibility = 'hidden'
-                      }}
+                      filename={o.filename}
+                      checked={checked}
                     />
                     <Checkbox
                       checked={checked}
@@ -331,5 +316,30 @@ function GpuSection() {
         </AlertDialogContent>
       </AlertDialog>
     </section>
+  )
+}
+
+/** 孤儿缩略图:加载态用 state 管理淡入,避免 checked 等无关 prop 变化触发 React 重设 className 把命令式清掉的 opacity-0 刷回来 */
+function GpuOrphanThumb({
+  src,
+  filename,
+  checked,
+}: {
+  src: string
+  filename: string
+  checked: boolean
+}) {
+  const [loaded, setLoaded] = useState(false)
+  return (
+    <img
+      src={src}
+      alt={filename}
+      loading="lazy"
+      className={`aspect-square w-full rounded-md border object-cover transition-opacity duration-250 ${loaded ? '' : 'opacity-0'} ${checked ? 'ring-2 ring-destructive' : ''}`}
+      onLoad={() => setLoaded(true)}
+      onError={(e) => {
+        ;(e.target as HTMLImageElement).style.visibility = 'hidden'
+      }}
+    />
   )
 }

@@ -294,7 +294,7 @@ export default function TemplateImportPage() {
 
   return (
     <div
-      className="space-y-4"
+      className="space-y-6"
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {
         e.preventDefault()
@@ -307,7 +307,7 @@ export default function TemplateImportPage() {
       <p className="text-sm text-muted-foreground">
         支持 UI 格式 / API 格式 JSON、ComfyUI 生成的 PNG(可直接拖拽到页面),或粘贴 JSON 文本。
       </p>
-      <div className="flex flex-wrap items-center gap-4">
+      <div className="flex flex-wrap items-center gap-4 rounded-lg border bg-card p-4">
         <Input
           type="file"
           accept=".json,.png"
@@ -349,7 +349,7 @@ export default function TemplateImportPage() {
         <p className="text-sm text-muted-foreground">⚠ 未校验(ComfyUI 离线),模型存在性将在运行时才能发现</p>
       )}
       {validation && validation.warnings.length > 0 && (
-        <div className="space-y-1 rounded-md border border-yellow-600/50 bg-yellow-500/10 p-3 text-sm">
+        <div className="space-y-1 rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-warning">
           {validation.warnings.map((w, i) => (
             <p key={i}>
               ⚠ 节点 {w.nodeId} {w.classType}
@@ -374,7 +374,7 @@ export default function TemplateImportPage() {
             </p>
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-3">
             {groups.map(([nodeId, groupRows]) => {
               const title = nodeTitle(nodeId, groupRows[0]!.classType)
               const isCollapsed = !q && collapsed.has(nodeId)

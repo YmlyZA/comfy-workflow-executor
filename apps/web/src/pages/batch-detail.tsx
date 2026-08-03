@@ -2,10 +2,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { DicesIcon } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useState } from 'react'
+import { toast } from 'sonner'
 import type { BatchStatus, JobStatus, ParamValues } from '@cwe/shared'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
+import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
   TableBody,
@@ -24,7 +25,7 @@ import {
 import { OfflineBanner } from '@/components/offline-banner'
 import { useEvents } from '@/hooks/use-events'
 import { api, downloadUrl, errorMessage, outputUrl } from '@/lib/api'
-import { statusVariant } from '@/pages/batches'
+import { StatusBadge } from '@/pages/batches'
 import type { TemplateDto } from '@/pages/templates'
 
 export interface JobDto {
@@ -62,35 +63,48 @@ export default function BatchDetailPage() {
     retry: false,
   })
 
-  const [actMsg, setActMsg] = useState('')
   const act = useMutation({
     mutationFn: (action: 'cancel' | 'retry-failed') =>
       api(`/batches/${id}/${action}`, { method: 'POST' }),
     onSuccess: () => {
-      setActMsg('')
       void qc.invalidateQueries({ queryKey: ['batches'] })
     },
     // 竞态兜底:点击瞬间 batch 已结束会收到 409,提示并刷新到真实状态
     onError: (e) => {
-      setActMsg(errorMessage(e))
+      toast.error(errorMessage(e))
       void qc.invalidateQueries({ queryKey: ['batches'] })
     },
   })
 
-  const [rerollMsg, setRerollMsg] = useState('')
   const reroll = useMutation({
     mutationFn: (jobId: number) =>
       api<{ jobId: number; sortOrder: number }>(`/batches/${id}/jobs/${jobId}/reroll`, {
         method: 'POST',
       }),
     onSuccess: (r) => {
-      setRerollMsg(`已追加 #${r.sortOrder}`)
+      toast.success(`已追加 #${r.sortOrder}`)
       void qc.invalidateQueries({ queryKey: ['batches'] })
     },
-    onError: (e) => setRerollMsg(errorMessage(e, '重roll失败')),
+    onError: (e) => toast.error(errorMessage(e, '重roll失败')),
   })
 
-  if (isPending) return <p className="text-sm text-muted-foreground">加载中……</p>
+  if (isPending)
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-8 w-64" />
+        <Skeleton className="h-2 w-full" />
+        <div className="space-y-2">
+          {Array.from({ length: 5 }, (_, i) => (
+            <Skeleton key={i} className="h-10 w-full" />
+          ))}
+        </div>
+        <div className="grid grid-cols-4 gap-4">
+          {Array.from({ length: 8 }, (_, i) => (
+            <Skeleton key={i} className="aspect-square w-full" />
+          ))}
+        </div>
+      </div>
+    )
   if (error || !data)
     return (
       <div className="space-y-3">
@@ -131,7 +145,7 @@ export default function BatchDetailPage() {
             </Button>
           </span>
           <h1 className="text-xl font-semibold">{batch.name}</h1>
-          <Badge variant={statusVariant[batch.status]}>{batch.status}</Badge>
+          <StatusBadge status={batch.status} />
           <span className="text-sm text-muted-foreground">模板：{template.name}</span>
         </div>
         <div className="space-x-2">
@@ -160,7 +174,6 @@ export default function BatchDetailPage() {
         <Progress value={(done / Math.max(jobs.length, 1)) * 100} />
         <p className="text-sm text-muted-foreground">
           {done}/{jobs.length} 完成
-          {actMsg && <span className="ml-2 text-destructive">{actMsg}</span>}
         </p>
       </div>
 
@@ -182,7 +195,7 @@ export default function BatchDetailPage() {
                 {JSON.stringify(j.params)}
               </TableCell>
               <TableCell>
-                <Badge variant={statusVariant[j.status]}>{j.status}</Badge>
+                <StatusBadge status={j.status} />
                 {j.status === 'running' && progress[j.id] && (
                   <span className="ml-2 text-xs text-muted-foreground">
                     {progress[j.id]!.value}/{progress[j.id]!.max}
@@ -206,10 +219,7 @@ export default function BatchDetailPage() {
 
       {gallery.length > 0 && (
         <div>
-          <h2 className="mb-3 font-medium">
-            结果画廊（{gallery.length}）
-            {rerollMsg && <span className="ml-2 text-xs text-muted-foreground">{rerollMsg}</span>}
-          </h2>
+          <h2 className="mb-3 font-medium">结果画廊（{gallery.length}）</h2>
           <div className="grid grid-cols-4 gap-4">
             {gallery.map(({ job, output }, i) => (
               <div key={output.path} className="group relative space-y-1">
@@ -222,7 +232,10 @@ export default function BatchDetailPage() {
                     src={outputUrl(output.path)}
                     alt={output.filename}
                     loading="lazy"
-                    className="aspect-square w-full rounded-md border object-cover transition group-hover:opacity-80"
+                    className="aspect-square w-full rounded-md border object-cover opacity-0 transition-[opacity,transform,box-shadow] duration-250 group-hover:scale-[1.02] group-hover:shadow-md"
+                    onLoad={(e) => {
+                      ;(e.target as HTMLImageElement).classList.remove('opacity-0')
+                    }}
                   />
                   <p className="truncate font-mono text-xs text-muted-foreground">
                     #{job.sortOrder} {JSON.stringify(job.params)}
