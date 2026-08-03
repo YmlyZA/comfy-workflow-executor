@@ -7,7 +7,7 @@ export function HostStatus() {
   useComfyStatusFeed()
   const status = useComfyStatus()
   const color =
-    status == null ? 'bg-muted-foreground' : status.online ? 'bg-green-500' : 'bg-red-500'
+    status == null ? 'bg-muted-foreground' : status.online ? 'bg-success' : 'bg-destructive'
   const title = status == null ? '探测中' : status.online ? '在线' : '离线'
   return (
     <Link

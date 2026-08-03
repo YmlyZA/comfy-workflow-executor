@@ -51,13 +51,28 @@ export interface BatchSummaryDto {
   failed: number
 }
 
-export const statusVariant: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
-  pending: 'outline',
+export const statusVariant: Record<
+  string,
+  'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning'
+> = {
+  pending: 'secondary',
   running: 'default',
-  completed: 'secondary',
+  completed: 'success',
   canceled: 'outline',
-  succeeded: 'secondary',
+  succeeded: 'success',
   failed: 'destructive',
+}
+
+/** running 状态 Badge 前置脉冲圆点,与 statusVariant 配套使用 */
+export function StatusBadge({ status }: { status: string }) {
+  return (
+    <Badge variant={statusVariant[status]}>
+      {status === 'running' && (
+        <span className="size-1.5 animate-pulse rounded-full bg-current" />
+      )}
+      {status}
+    </Badge>
+  )
 }
 
 const STATUSES: BatchStatus[] = ['pending', 'running', 'completed', 'canceled']
@@ -86,7 +101,7 @@ const columns: ColumnDef<BatchSummaryDto, any>[] = [
     accessorKey: 'status',
     meta: { title: '状态' },
     header: '状态',
-    cell: ({ row }) => <Badge variant={statusVariant[row.original.status]}>{row.original.status}</Badge>,
+    cell: ({ row }) => <StatusBadge status={row.original.status} />,
     filterFn: (row, id, value: string[]) =>
       value.length === 0 || value.includes(String(row.getValue(id))),
     enableSorting: false,

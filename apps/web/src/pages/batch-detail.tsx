@@ -24,7 +24,7 @@ import {
 import { OfflineBanner } from '@/components/offline-banner'
 import { useEvents } from '@/hooks/use-events'
 import { api, downloadUrl, errorMessage, outputUrl } from '@/lib/api'
-import { statusVariant } from '@/pages/batches'
+import { StatusBadge, statusVariant } from '@/pages/batches'
 import type { TemplateDto } from '@/pages/templates'
 
 export interface JobDto {
@@ -131,7 +131,7 @@ export default function BatchDetailPage() {
             </Button>
           </span>
           <h1 className="text-xl font-semibold">{batch.name}</h1>
-          <Badge variant={statusVariant[batch.status]}>{batch.status}</Badge>
+          <StatusBadge status={batch.status} />
           <span className="text-sm text-muted-foreground">模板：{template.name}</span>
         </div>
         <div className="space-x-2">
@@ -182,7 +182,7 @@ export default function BatchDetailPage() {
                 {JSON.stringify(j.params)}
               </TableCell>
               <TableCell>
-                <Badge variant={statusVariant[j.status]}>{j.status}</Badge>
+                <StatusBadge status={j.status} />
                 {j.status === 'running' && progress[j.id] && (
                   <span className="ml-2 text-xs text-muted-foreground">
                     {progress[j.id]!.value}/{progress[j.id]!.max}

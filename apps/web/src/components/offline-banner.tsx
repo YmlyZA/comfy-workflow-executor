@@ -5,7 +5,7 @@ export function OfflineBanner({ hasActiveWork }: { hasActiveWork: boolean }) {
   const status = useComfyStatus()
   if (!status || status.online || !hasActiveWork) return null
   return (
-    <div className="rounded-md border border-yellow-500/50 bg-yellow-500/10 px-4 py-2 text-sm">
+    <div className="rounded-md border border-warning/40 bg-warning/10 px-4 py-2 text-sm text-warning">
       GPU 主机离线，任务将在主机恢复后自动继续。
     </div>
   )

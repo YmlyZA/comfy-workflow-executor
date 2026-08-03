@@ -349,7 +349,7 @@ export default function TemplateImportPage() {
         <p className="text-sm text-muted-foreground">⚠ 未校验(ComfyUI 离线),模型存在性将在运行时才能发现</p>
       )}
       {validation && validation.warnings.length > 0 && (
-        <div className="space-y-1 rounded-md border border-yellow-600/50 bg-yellow-500/10 p-3 text-sm">
+        <div className="space-y-1 rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-warning">
           {validation.warnings.map((w, i) => (
             <p key={i}>
               ⚠ 节点 {w.nodeId} {w.classType}
