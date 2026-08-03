@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'n
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { createApp } from '../src/app.js'
+import { createApp, type AppDeps } from '../src/app.js'
 import { loadConfig } from '../src/config.js'
 import { createDb, type Db } from '../src/db/index.js'
 import * as repo from '../src/db/repo.js'
@@ -324,13 +324,14 @@ describe('DELETE /api/batches/:id purgeGpu', () => {
   function makeComfyApp() {
     const comfy = new FakeComfy()
     const localDb = createDb(':memory:')
-    const localApp = createApp({
+    const localDeps: AppDeps = {
       config: loadConfig({ AUTH_TOKEN: 'secret' }),
       db: localDb,
       comfy,
       events: new EventEmitter(),
-    })
-    return { comfy, localDb, localApp }
+    }
+    const localApp = createApp(localDeps)
+    return { comfy, localDb, localApp, localDeps }
   }
 
   /** 建一个已完成 batch:job0 两个输出同 gpu 引用(测去重),job1 一个无引用输出(测跳过) */
@@ -363,6 +364,29 @@ describe('DELETE /api/batches/:id purgeGpu', () => {
     expect(await res.json()).toEqual({ ok: true, gpuSkipped: 1 })
     expect(comfy.cweDeleted).toEqual([[{ filename: 'a.png', subfolder: 'sub' }]])
   })
+
+  it('删除与主机切换共锁串行:锁被占用时排队,释放后才执行', async () => {
+    const { comfy, localDb, localApp, localDeps } = makeComfyApp()
+    const b = seedFinished(localDb)
+    let release!: () => void
+    const gate = new Promise<void>((r) => {
+      release = r
+    })
+    void localDeps.switchLock!.run(() => gate) // 模拟一次进行中的主机切换
+    let done = false
+    const p = Promise.resolve(
+      localApp.request(`/api/batches/${b.id}?purgeGpu=1`, { method: 'DELETE', headers: H }),
+    ).then((r) => {
+      done = true
+      return r
+    })
+    await new Promise((r) => setTimeout(r, 30))
+    expect(done).toBe(false) // 删除被挡在临界区外
+    expect(comfy.cweDeleted).toEqual([])
+    release()
+    expect((await p).status).toBe(200)
+    expect(comfy.cweDeleted).toEqual([[{ filename: 'a.png', subfolder: 'sub' }]])
+  }, 15000)
 
   it('扩展调用抛错时 gpuPurgeFailed 且 batch 已删', async () => {
     const { comfy, localDb, localApp } = makeComfyApp()

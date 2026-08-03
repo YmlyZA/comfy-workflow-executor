@@ -27,6 +27,9 @@ export function hostRoutes(deps: AppDeps) {
   // 与数据导入共用同一把锁(同一个 deps 对象,谁先建谁负责初始化)
   const lock = (deps.switchLock ??= createAsyncLock())
 
+  /** `/:id` 路径参数:非纯数字返回 null,由调用方回 400 */
+  const idParam = (raw: string): number | null => (/^\d+$/.test(raw) ? Number(raw) : null)
+
   app.get('/', (c) => c.json({ hosts: repo.listHosts(deps.db) }))
 
   app.post('/', async (c) => {
@@ -62,42 +65,63 @@ export function hostRoutes(deps: AppDeps) {
   })
 
   app.patch('/:id', async (c) => {
-    const id = Number(c.req.param('id'))
+    const id = idParam(c.req.param('id'))
+    if (id === null) return c.json({ error: '无效的 host id' }, 400)
     const patch = patchSchema.parse(await c.req.json())
-    const before = repo.getHost(deps.db, id)
-    if (!before) return c.json({ error: 'host 不存在' }, 404)
-    const urlChanged = patch.url !== undefined && patch.url !== before.url
-    // 不动 active 主机地址的改动(改名/改非当前主机)不触发重连
-    if (before.active !== 1 || !urlChanged) {
-      return c.json({ host: repo.updateHost(deps.db, id, patch)! })
-    }
-    // 改 active 主机的 URL = 租用 pod 换地址:等待模式重连(整段进锁,详见 host-switch.ts)
+    // 整段进锁:存在性判断与写入同一临界区,排队期间主机被删/易主也不会走错分支
     return await lock.run(async () => {
+      const before = repo.getHost(deps.db, id)
+      if (!before) return c.json({ error: 'host 不存在' }, 404)
+      const urlChanged = patch.url !== undefined && patch.url !== before.url
+      // 不动 active 主机地址的改动(改名/改非当前主机)不触发重连
+      if (before.active !== 1 || !urlChanged) {
+        const host = repo.updateHost(deps.db, id, patch)
+        if (!host) return c.json({ error: 'host 不存在' }, 404)
+        return c.json({ host })
+      }
+      // 改 active 主机的 URL = 租用 pod 换地址:等待模式重连(详见 host-switch.ts)
       await deps.executor?.pause()
       const host = repo.updateHost(deps.db, id, patch)!
-      await reconnectComfy(deps, host)
+      try {
+        await reconnectComfy(deps, host)
+      } catch {
+        // 当前实现的探测/广播不会抛;防御未来改动:表变更已提交,确保 executor 恢复运转
+        deps.executor?.resume(deps.db)
+      }
       return c.json({ host })
     })
   })
 
   app.delete('/:id', async (c) => {
-    const result = repo.deleteHost(deps.db, Number(c.req.param('id')))
-    if (result === 'active') return c.json({ error: '当前主机不可删除' }, 409)
-    return c.json({ ok: true })
+    const id = idParam(c.req.param('id'))
+    if (id === null) return c.json({ error: '无效的 host id' }, 400)
+    // 进锁:不与切换/改 URL 的临界区并发,消除锁内非空断言的删除竞态窗口
+    return await lock.run(async () => {
+      const result = repo.deleteHost(deps.db, id)
+      if (result === 'active') return c.json({ error: '当前主机不可删除' }, 409)
+      return c.json({ ok: true })
+    })
   })
 
   app.post('/:id/activate', async (c) => {
-    const id = Number(c.req.param('id'))
+    const id = idParam(c.req.param('id'))
+    if (id === null) return c.json({ error: '无效的 host id' }, 400)
     const { mode } = activateSchema.parse(await c.req.json())
-    const target = repo.getHost(deps.db, id)
-    if (!target) return c.json({ error: 'host 不存在' }, 404)
-    if (target.active === 1) return c.json({ host: target })
-    // 整段进锁:与另一次 activate / 改 URL / 数据导入互斥,避免起出两个 executor loop
+    // 整段进锁:与另一次 activate / 改 URL / 删除 / 数据导入互斥,避免起出两个 executor loop
     return await lock.run(async () => {
+      // 锁内重查:排队期间目标主机可能被删除或已被激活
+      const target = repo.getHost(deps.db, id)
+      if (!target) return c.json({ error: 'host 不存在' }, 404)
+      if (target.active === 1) return c.json({ host: target })
       // 先 pause 再切表:否则等待期间 executor 可能认领新 job 并盖上新主机的章
       await deps.executor?.pause(mode === 'interrupt' ? { abandon: true } : undefined)
       const host = repo.activateHost(deps.db, id)!
-      await reconnectComfy(deps, host)
+      try {
+        await reconnectComfy(deps, host)
+      } catch {
+        // 同 PATCH:防御未来改动,保证 executor 不停留在 paused
+        deps.executor?.resume(deps.db)
+      }
       return c.json({ host })
     })
   })

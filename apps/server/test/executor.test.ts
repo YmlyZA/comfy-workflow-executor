@@ -382,26 +382,38 @@ describe('pause({abandon})/resume(主机切换)', () => {
   it('abandon 时 interrupt 在途中无重复提交(stop 在 interrupt 前)', async () => {
     seed()
     comfy.historyDelayPolls = 1e9
-    let interruptResolve: (() => void) | null = null
+    const order: string[] = []
+    let interruptResolve!: () => void
     const interruptPending = new Promise<void>((r) => {
       interruptResolve = r
     })
+    let enteredResolve!: () => void
+    const interruptEntered = new Promise<void>((r) => {
+      enteredResolve = r
+    })
     comfy.interrupt = async () => {
+      order.push('interrupt')
+      enteredResolve()
       await interruptPending
     }
     const ex = makeExecutor()
+    // 记录 stop/interrupt 调用顺序:stop 在前是"无重复提交"的根据
+    const origStop = ex.stop.bind(ex)
+    ex.stop = () => {
+      order.push('stop')
+      origStop()
+    }
     ex.start()
     await vi.waitFor(() => expect(repo.listRunningJobs(db)).toHaveLength(1))
     expect(comfy.submitted).toHaveLength(1)
     const pausePromise = ex.pause({ abandon: true })
-    // 给 pause 一点时间进入 interrupt 的 await
-    await new Promise((r) => setTimeout(r, 50))
-    // interrupt 还在途中,验证没有二次提交(证明 stop() 已被调用)
+    // 确定性同步点:等 pause 真正进入 interrupt 的 await(不再依赖 sleep 猜时机)
+    await interruptEntered
+    expect(order).toEqual(['stop', 'interrupt'])
+    // stop 已先行,循环不可能再认领/提交
     expect(comfy.submitted).toHaveLength(1)
-    // 解除 interrupt 阻塞
-    interruptResolve!()
+    interruptResolve()
     await pausePromise
-    // 最终仍只有一次提交
     expect(comfy.submitted).toHaveLength(1)
   })
 })

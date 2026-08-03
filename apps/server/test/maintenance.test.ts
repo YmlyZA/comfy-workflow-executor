@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { existsSync, mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -72,6 +72,23 @@ describe('GET /api/maintenance/summary', () => {
       thumbs: { count: 0, bytes: 0 },
       orphanOutputs: { count: 0, bytes: 0 },
     })
+  })
+
+  it('thumbs 内指向祖先的符号链接:不递归不计数,summary 正常返回', async () => {
+    seedDisk()
+    // 链接指回 dataDir,若跟随符号链接会无限递归(dataDir → thumbs → loop → dataDir …)
+    symlinkSync(dataDir, join(dataDir, 'thumbs', 'loop'))
+    const res = await app.request('/api/maintenance/summary', { headers: H })
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as any).thumbs.count).toBe(2)
+  })
+
+  it("非规范数字目录名('0'+现存 id)视为孤儿,不因 Number() 宽松解析漏判", async () => {
+    const b = seedDisk()
+    mkdirSync(join(dataDir, 'outputs', `0${b.id}`))
+    const res = await app.request('/api/maintenance/summary', { headers: H })
+    const body = (await res.json()) as any
+    expect(body.orphanOutputs.count).toBe(3) // 9999 + not-a-batch + 0<id>
   })
 })
 
@@ -253,6 +270,23 @@ describe('GPU 孤儿扫描与清理', () => {
     expect(body.deleted).toBe(1)
     // 只转发未被引用的条目
     expect(fake().cweDeleted).toEqual([[{ filename: 'stray.png', subfolder: '' }]])
+  })
+
+  it('gpu-clean 过滤后待删为空:不调用扩展,直接返回全零结果', async () => {
+    const h1 = repo.ensureActiveHost(db, 'http://h1:8188')
+    seedRefs() // 引用 subfolder='' filename='a.png'
+    const res = await app.request('/api/maintenance/gpu-clean', {
+      method: 'POST',
+      headers: H,
+      body: JSON.stringify({ hostId: h1.id, files: [{ filename: 'a.png', subfolder: '' }] }),
+    })
+    expect((await res.json()) as any).toEqual({
+      deleted: 0,
+      missing: 0,
+      failed: [],
+      skippedReferenced: 1,
+    })
+    expect(fake().cweDeleted).toEqual([])
   })
 
   it('无被引用条目时响应不带 skippedReferenced 字段', async () => {
