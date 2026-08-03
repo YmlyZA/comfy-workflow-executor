@@ -58,6 +58,8 @@ export default function BatchDetailPage() {
   const { data, isPending, error } = useQuery({
     queryKey: ['batches', id],
     queryFn: () => api<BatchDetailDto>(`/batches/${id}`),
+    // 404(batch 不存在)没有重试的意义;禁用默认的 3 次退避重试,失败即刻显示错误态
+    retry: false,
   })
 
   const [actMsg, setActMsg] = useState('')
