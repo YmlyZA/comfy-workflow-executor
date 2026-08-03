@@ -247,7 +247,10 @@ function GpuSection() {
                       src={comfyOutputThumbUrl(scan.host.id, o.subfolder ? `${o.subfolder}/${o.filename}` : o.filename)}
                       alt={o.filename}
                       loading="lazy"
-                      className={`aspect-square w-full rounded-md border object-cover ${checked ? 'ring-2 ring-destructive' : ''}`}
+                      className={`aspect-square w-full rounded-md border object-cover opacity-0 transition-opacity duration-250 ${checked ? 'ring-2 ring-destructive' : ''}`}
+                      onLoad={(e) => {
+                        ;(e.target as HTMLImageElement).classList.remove('opacity-0')
+                      }}
                       onError={(e) => {
                         ;(e.target as HTMLImageElement).style.visibility = 'hidden'
                       }}

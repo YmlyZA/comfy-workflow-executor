@@ -7,6 +7,7 @@ import type { BatchStatus, JobStatus, ParamValues } from '@cwe/shared'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
+import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
   TableBody,
@@ -88,7 +89,23 @@ export default function BatchDetailPage() {
     onError: (e) => toast.error(errorMessage(e, '重roll失败')),
   })
 
-  if (isPending) return <p className="text-sm text-muted-foreground">加载中……</p>
+  if (isPending)
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-8 w-64" />
+        <Skeleton className="h-2 w-full" />
+        <div className="space-y-2">
+          {Array.from({ length: 5 }, (_, i) => (
+            <Skeleton key={i} className="h-10 w-full" />
+          ))}
+        </div>
+        <div className="grid grid-cols-4 gap-4">
+          {Array.from({ length: 8 }, (_, i) => (
+            <Skeleton key={i} className="aspect-square w-full" />
+          ))}
+        </div>
+      </div>
+    )
   if (error || !data)
     return (
       <div className="space-y-3">
@@ -216,7 +233,10 @@ export default function BatchDetailPage() {
                     src={outputUrl(output.path)}
                     alt={output.filename}
                     loading="lazy"
-                    className="aspect-square w-full rounded-md border object-cover transition group-hover:opacity-80"
+                    className="aspect-square w-full rounded-md border object-cover opacity-0 transition-[opacity,transform,box-shadow] duration-250 group-hover:scale-[1.02] group-hover:shadow-md"
+                    onLoad={(e) => {
+                      ;(e.target as HTMLImageElement).classList.remove('opacity-0')
+                    }}
                   />
                   <p className="truncate font-mono text-xs text-muted-foreground">
                     #{job.sortOrder} {JSON.stringify(job.params)}

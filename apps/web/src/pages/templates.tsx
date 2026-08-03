@@ -32,6 +32,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
+import { Skeleton } from '@/components/ui/skeleton'
 import { DataTable, SortableHeader, selectColumn } from '@/components/data-table/data-table'
 import { DragHandle } from '@/components/data-table/sortable-rows'
 import { api } from '@/lib/api'
@@ -112,7 +113,7 @@ const columns: ColumnDef<TemplateDto, any>[] = [
 
 export default function TemplatesPage() {
   const qc = useQueryClient()
-  const { data: templates = [] } = useQuery({
+  const { data: templates = [], isPending } = useQuery({
     queryKey: ['templates'],
     queryFn: () => api<TemplateDto[]>('/templates'),
   })
@@ -138,6 +139,16 @@ export default function TemplatesPage() {
     },
     onSettled: () => qc.invalidateQueries({ queryKey: ['templates'] }),
   })
+
+  if (isPending)
+    return (
+      <div className="space-y-2">
+        <Skeleton className="h-8 w-48" />
+        {Array.from({ length: 5 }, (_, i) => (
+          <Skeleton key={i} className="h-10 w-full" />
+        ))}
+      </div>
+    )
 
   return (
     <div className="space-y-4">

@@ -32,6 +32,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Skeleton } from '@/components/ui/skeleton'
 import { DataTable, SortableHeader, selectColumn } from '@/components/data-table/data-table'
 import { OfflineBanner } from '@/components/offline-banner'
 import { useEvents } from '@/hooks/use-events'
@@ -134,11 +135,21 @@ const columns: ColumnDef<BatchSummaryDto, any>[] = [
 
 export default function BatchesPage() {
   useEvents()
-  const { data: batches = [] } = useQuery({
+  const { data: batches = [], isPending } = useQuery({
     queryKey: ['batches'],
     queryFn: () => api<BatchSummaryDto[]>('/batches'),
   })
   const templateNames = [...new Set(batches.map((b) => b.templateName))]
+
+  if (isPending)
+    return (
+      <div className="space-y-2">
+        <Skeleton className="h-8 w-48" />
+        {Array.from({ length: 5 }, (_, i) => (
+          <Skeleton key={i} className="h-10 w-full" />
+        ))}
+      </div>
+    )
 
   return (
     <div className="space-y-4">
