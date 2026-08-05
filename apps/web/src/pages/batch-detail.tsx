@@ -323,6 +323,7 @@ function Lightbox({
         </DialogHeader>
         {comparing ? (
           <ImageCompare
+            key={`${cur.job.id}:${activeDef.key}`}
             beforeCandidates={[
               uploadFileUrl(imageParamValue(activeDef, cur.job.params)),
               comfyInputFileUrl(imageParamValue(activeDef, cur.job.params)),
