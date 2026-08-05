@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { DicesIcon } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import type { BatchStatus, JobStatus, ParamValues } from '@cwe/shared'
+import type { BatchStatus, JobStatus, ParamDef, ParamValues } from '@cwe/shared'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -22,9 +22,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { ImageCompare } from '@/components/image-compare'
 import { OfflineBanner } from '@/components/offline-banner'
 import { useEvents } from '@/hooks/use-events'
-import { api, downloadUrl, errorMessage, outputUrl } from '@/lib/api'
+import { api, comfyInputFileUrl, downloadUrl, errorMessage, outputUrl, uploadFileUrl } from '@/lib/api'
+import { imageParamsOf, imageParamValue } from '@/lib/image-params'
 import { StatusBadge } from '@/pages/batches'
 import type { TemplateDto } from '@/pages/templates'
 
@@ -266,6 +268,7 @@ export default function BatchDetailPage() {
           hasSeed={hasSeed}
           rerollPending={reroll.isPending}
           onReroll={(jobId) => reroll.mutate(jobId)}
+          imageParamDefs={template.params.filter((p) => p.type === 'image')}
         />
       )}
     </div>
@@ -280,6 +283,7 @@ function Lightbox({
   hasSeed,
   rerollPending,
   onReroll,
+  imageParamDefs,
 }: {
   items: Array<{ job: JobDto; output: { path: string; filename: string } }>
   index: number
@@ -288,9 +292,21 @@ function Lightbox({
   hasSeed: boolean
   rerollPending: boolean
   onReroll: (jobId: number) => void
+  imageParamDefs: ParamDef[]
 }) {
+  const [compare, setCompare] = useState(false)
+  const [compareKey, setCompareKey] = useState<string | null>(null)
   const cur = items[index]
+  const imgParams = cur ? imageParamsOf(imageParamDefs, cur.job.params) : []
+  const hasCompare = imgParams.length > 0
+  // 翻页:重置参数选择;翻到无 image 输入的 job 自动退出对比模式
+  useEffect(() => {
+    setCompareKey(null)
+    if (!hasCompare) setCompare(false)
+  }, [index, hasCompare])
   if (!cur) return null
+  const activeDef = imgParams.find((p) => p.key === compareKey) ?? imgParams[0]
+  const comparing = compare && activeDef !== undefined
   return (
     <Dialog open onOpenChange={(v) => { if (!v) onClose() }}>
       <DialogContent
@@ -305,11 +321,36 @@ function Lightbox({
             {index + 1} / {items.length} · #{cur.job.sortOrder} · {cur.output.filename}
           </DialogTitle>
         </DialogHeader>
-        <img
-          src={outputUrl(cur.output.path)}
-          alt={cur.output.filename}
-          className="max-h-[70vh] w-full rounded-md object-contain"
-        />
+        {comparing ? (
+          <ImageCompare
+            beforeCandidates={[
+              uploadFileUrl(imageParamValue(activeDef, cur.job.params)),
+              comfyInputFileUrl(imageParamValue(activeDef, cur.job.params)),
+            ]}
+            afterSrc={outputUrl(cur.output.path)}
+            afterAlt={cur.output.filename}
+          />
+        ) : (
+          <img
+            src={outputUrl(cur.output.path)}
+            alt={cur.output.filename}
+            className="max-h-[70vh] w-full rounded-md object-contain"
+          />
+        )}
+        {comparing && imgParams.length > 1 && (
+          <span className="flex gap-1">
+            {imgParams.map((p) => (
+              <Button
+                key={p.key}
+                size="sm"
+                variant={p.key === activeDef.key ? 'secondary' : 'ghost'}
+                onClick={() => setCompareKey(p.key)}
+              >
+                {p.label}
+              </Button>
+            ))}
+          </span>
+        )}
         <p className="max-h-20 overflow-y-auto font-mono text-xs text-muted-foreground">
           {JSON.stringify(cur.job.params)}
         </p>
@@ -326,6 +367,15 @@ function Lightbox({
             >
               →
             </Button>
+            {hasCompare && (
+              <Button
+                size="sm"
+                variant={compare ? 'secondary' : 'outline'}
+                onClick={() => setCompare((v) => !v)}
+              >
+                对比原图
+              </Button>
+            )}
           </span>
           <span className="flex gap-2">
             <Button
