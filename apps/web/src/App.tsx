@@ -37,7 +37,7 @@ function RequireToken() {
   const { resolved } = useTheme()
   if (!getToken()) return <Navigate to="/login" state={{ from: location }} replace />
   return (
-    <div className="mx-auto max-w-6xl p-4 pb-20 md:p-6 md:pb-6">
+    <div className="mx-auto max-w-6xl p-4 pb-[calc(5rem+env(safe-area-inset-bottom))] md:p-6 md:pb-6">
       <nav className="mb-4 flex items-center gap-3 border-b pb-3 md:mb-6 md:gap-6 md:pb-4">
         <span className="min-w-0 truncate font-semibold">Comfy Workflow Executor</span>
         <div className="hidden items-center gap-6 md:flex">

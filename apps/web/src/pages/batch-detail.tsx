@@ -340,6 +340,7 @@ function Lightbox({
             draggable={false}
             className="max-h-[70vh] w-full touch-pan-y rounded-md object-contain select-none"
             onPointerDown={(e) => {
+              e.currentTarget.setPointerCapture(e.pointerId)
               swipeStart.current = { x: e.clientX, y: e.clientY }
             }}
             onPointerUp={(e) => {
