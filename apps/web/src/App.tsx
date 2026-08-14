@@ -3,6 +3,7 @@ import { MonitorIcon, MoonIcon, SunIcon } from 'lucide-react'
 import { Toaster } from 'sonner'
 import { getToken } from '@/lib/api'
 import { HostStatus } from '@/components/host-status'
+import { MobileTabBar } from '@/components/mobile-tab-bar'
 import { cn } from '@/lib/utils'
 import {
   DropdownMenu,
@@ -36,32 +37,35 @@ function RequireToken() {
   const { resolved } = useTheme()
   if (!getToken()) return <Navigate to="/login" state={{ from: location }} replace />
   return (
-    <div className="mx-auto max-w-6xl p-6">
-      <nav className="mb-6 flex items-center gap-6 border-b pb-4">
-        <span className="font-semibold">Comfy Workflow Executor</span>
-        <NavLink to="/batches" className={navCls}>
-          Batches
-        </NavLink>
-        <NavLink to="/templates" className={navCls}>
-          Templates
-        </NavLink>
-        <NavLink to="/prompts" className={navCls}>
-          Prompt 库
-        </NavLink>
-        <NavLink to="/backup" className={navCls}>
-          数据备份
-        </NavLink>
-        <NavLink to="/hosts" className={navCls}>
-          GPU 主机
-        </NavLink>
-        <NavLink to="/maintenance" className={navCls}>
-          维护
-        </NavLink>
+    <div className="mx-auto max-w-6xl p-4 pb-20 md:p-6 md:pb-6">
+      <nav className="mb-4 flex items-center gap-3 border-b pb-3 md:mb-6 md:gap-6 md:pb-4">
+        <span className="min-w-0 truncate font-semibold">Comfy Workflow Executor</span>
+        <div className="hidden items-center gap-6 md:flex">
+          <NavLink to="/batches" className={navCls}>
+            Batches
+          </NavLink>
+          <NavLink to="/templates" className={navCls}>
+            Templates
+          </NavLink>
+          <NavLink to="/prompts" className={navCls}>
+            Prompt 库
+          </NavLink>
+          <NavLink to="/backup" className={navCls}>
+            数据备份
+          </NavLink>
+          <NavLink to="/hosts" className={navCls}>
+            GPU 主机
+          </NavLink>
+          <NavLink to="/maintenance" className={navCls}>
+            维护
+          </NavLink>
+        </div>
         <ThemeToggle />
         <HostStatus />
       </nav>
       <Outlet />
-      <Toaster richColors position="bottom-right" theme={resolved} />
+      <MobileTabBar />
+      <Toaster richColors position="bottom-right" theme={resolved} mobileOffset={{ bottom: 80 }} />
     </div>
   )
 }
