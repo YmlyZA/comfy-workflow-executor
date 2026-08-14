@@ -405,7 +405,7 @@ export default function TemplateImportPage() {
                     </span>
                   </button>
                   {!isCollapsed && (
-                    <div className="divide-y border-t">
+                    <div className="divide-y overflow-x-auto border-t">
                       {groupRows.map((r) => {
                         const id = rowId(r)
                         const sel = selected[id]
@@ -413,7 +413,7 @@ export default function TemplateImportPage() {
                           ? ['enum', 'text', 'number', 'seed', 'image']
                           : ['text', 'number', 'seed', 'image']
                         return (
-                          <div key={id} className="flex items-center gap-3 px-4 py-2">
+                          <div key={id} className="flex min-w-fit items-center gap-3 px-4 py-2">
                             <input
                               type="checkbox"
                               checked={!!sel}
