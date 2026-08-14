@@ -1,4 +1,4 @@
-import { Navigate, NavLink, Outlet, Route, Routes, useLocation } from 'react-router-dom'
+import { Link, Navigate, NavLink, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import { MonitorIcon, MoonIcon, SunIcon } from 'lucide-react'
 import { Toaster } from 'sonner'
 import { getToken } from '@/lib/api'
@@ -39,9 +39,11 @@ function RequireToken() {
   return (
     <div className="mx-auto max-w-6xl p-4 pb-[calc(5rem_+_env(safe-area-inset-bottom))] md:p-6 md:pb-6">
       <nav className="mb-4 flex items-center gap-3 border-b pb-3 md:mb-6 md:gap-6 md:pb-4">
-        {/* 小屏只显图标:文字标题会挤压右侧主机名,390/393px 机型间 wrap 表现不一致 */}
-        <img src="/icon.svg" alt="Comfy Workflow Executor" className="size-7 rounded-md md:hidden" />
-        <span className="hidden font-semibold md:block">Comfy Workflow Executor</span>
+        {/* 品牌区:图标常显(小屏只显图标防挤压主机名),点击回主页 */}
+        <Link to="/batches" className="flex min-w-0 items-center gap-2">
+          <img src="/icon.svg" alt="Comfy Workflow Executor" className="size-7 rounded-md" />
+          <span className="hidden font-semibold md:block">Comfy Workflow Executor</span>
+        </Link>
         <div className="hidden items-center gap-6 md:flex">
           <NavLink to="/batches" className={navCls}>
             Batches
