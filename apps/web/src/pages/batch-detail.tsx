@@ -126,8 +126,9 @@ export default function BatchDetailPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+      {/* 小屏固定分行(导航/名称+状态/模板/操作),避免 flex-wrap 随名字长短产生机型间不一致的断行 */}
+      <div className="flex flex-col gap-2 md:flex-row md:flex-wrap md:items-center md:justify-between">
+        <div className="flex flex-col gap-1.5 md:min-w-0 md:flex-row md:flex-wrap md:items-center md:gap-x-3 md:gap-y-1">
           <span className="flex gap-1">
             <Button
               size="sm"
@@ -146,9 +147,11 @@ export default function BatchDetailPage() {
               更新 →
             </Button>
           </span>
-          <h1 className="text-xl font-semibold">{batch.name}</h1>
-          <StatusBadge status={batch.status} />
-          <span className="text-sm text-muted-foreground">模板：{template.name}</span>
+          <span className="flex min-w-0 items-center gap-2 md:gap-3">
+            <h1 className="min-w-0 truncate text-xl font-semibold">{batch.name}</h1>
+            <StatusBadge status={batch.status} />
+          </span>
+          <span className="truncate text-sm text-muted-foreground">模板：{template.name}</span>
         </div>
         <div className="flex flex-wrap gap-2">
           {failed > 0 && (

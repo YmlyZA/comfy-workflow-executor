@@ -19,7 +19,9 @@
 
 - `≥md`：现有顶栏导航原样保留。
 - `<md`：
-  - 顶栏精简为一行：标题 + `HostStatus` + 主题按钮（`NavLink` 链接组隐藏）。
+  - 顶栏精简为一行：App 图标 + `HostStatus` + 主题按钮（`NavLink` 链接组隐藏）。验收修订：原「文字标题+truncate」方案在 390/393px 机型间因几 px 之差导致主机名折行不一致，改为小屏只显 `icon.svg` 图标（桌面仍为文字标题），同时补充 favicon（svg + png 192）。
+  - 验收修订（batch-detail 页头）：小屏改为固定分行（导航 / 名称+状态 / 模板 / 操作各一行），不再用 flex-wrap 自适应——断行点随名字长短漂移导致机型间不一致。
+  - 验收修订（batch-new）：模板/Batch 名称表单行小屏全宽堆叠（`w-full md:w-64` + flex-wrap），原固定 `w-64` 并排在 375px 溢出右边界。
   - 新增 `apps/web/src/components/mobile-tab-bar.tsx`：`fixed bottom-0 inset-x-0` 四个入口 **Batches / Templates / Prompt 库 / 更多**，lucide 图标 + `text-xs` 文字，active 态 `text-primary`（`NavLink` 判定）。「更多」用现有 DropdownMenu 向上弹出（`side="top"`），收纳 数据备份 / GPU 主机 / 维护，三项中任一 active 时「更多」入口高亮。
   - Tab 栏 `padding-bottom: env(safe-area-inset-bottom)` 避开 iPhone Home Indicator；背景 `bg-background` + 顶部 border，明暗主题下均不透底。
   - 内容区 `<md` 加 `pb-20` 防止被 Tab 栏遮挡；根容器 `p-6` → `p-4 md:p-6`。
