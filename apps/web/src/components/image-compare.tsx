@@ -2,6 +2,7 @@ import { useState } from 'react'
 
 /**
  * 悬停跟随的原图/生成图对比:分割线跟随指针 X,线左原图、线右生成图。
+ * 触屏:按住拖动跟随,松手停留在当前位置(不回弹)。
  * beforeCandidates 依序回退(uploads → comfy input);全部失败隐藏叠加层,仅显示生成图+提示。
  * 调用方需在候选来源变化时换 key remount,以重置回退阶段与分割位置。
  */
@@ -24,13 +25,15 @@ export function ImageCompare({
           拉伸到同一矩形——ComfyUI 尺寸取整(/8)造成的微小比例差被拉伸吸收,边缘逐边对齐 */}
       <div className="flex justify-center">
         <div
-          className="relative cursor-crosshair select-none"
+          className="relative cursor-crosshair touch-none select-none"
           onPointerMove={(e) => {
             const rect = e.currentTarget.getBoundingClientRect()
             if (rect.width === 0) return
             setPos(Math.min(100, Math.max(0, ((e.clientX - rect.left) / rect.width) * 100)))
           }}
-          onPointerLeave={() => setPos(50)}
+          onPointerLeave={(e) => {
+            if (e.pointerType === 'mouse') setPos(50)
+          }}
         >
           <img
             src={afterSrc}
