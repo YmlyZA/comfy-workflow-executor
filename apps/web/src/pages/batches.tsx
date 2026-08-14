@@ -1,5 +1,5 @@
 import { useQueryClient, useQuery } from '@tanstack/react-query'
-import type { ColumnDef, Table as TanstackTable } from '@tanstack/react-table'
+import type { ColumnDef, Row, Table as TanstackTable } from '@tanstack/react-table'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -32,13 +32,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
 import { DataTable, SortableHeader, selectColumn } from '@/components/data-table/data-table'
 import { OfflineBanner } from '@/components/offline-banner'
 import { useEvents } from '@/hooks/use-events'
 import { useCweStatus } from '@/hooks/use-cwe-status'
 import { api } from '@/lib/api'
-import { formatUtcDateTime } from '@/lib/utils'
+import { cn, formatUtcDateTime } from '@/lib/utils'
 import { batchBulkActions, runBulk, summarizeBulk } from '@/lib/bulk'
 
 export interface BatchSummaryDto {
@@ -74,6 +75,39 @@ export function StatusBadge({ status }: { status: string }) {
       )}
       {status}
     </Badge>
+  )
+}
+
+/** 小屏卡片:整卡 Link 覆盖跳详情,Checkbox 提到 z-10 之上避免触发跳转 */
+function BatchCard({ row }: { row: Row<BatchSummaryDto> }) {
+  const b = row.original
+  const done = b.succeeded + b.failed
+  return (
+    <div className={cn('relative rounded-md border p-3', row.getIsSelected() && 'border-primary')}>
+      <Link to={`/batches/${b.id}`} className="absolute inset-0" aria-label={b.name} />
+      <div className="flex items-center gap-2">
+        <span className="relative z-10 flex items-center">
+          <Checkbox
+            checked={row.getIsSelected()}
+            onCheckedChange={(v) => row.toggleSelected(!!v)}
+            aria-label="选择"
+          />
+        </span>
+        <span className="min-w-0 flex-1 truncate font-medium">{b.name}</span>
+        <StatusBadge status={b.status} />
+      </div>
+      <div className="mt-2 flex items-center gap-2">
+        <Progress className="flex-1" value={(done / Math.max(b.total, 1)) * 100} />
+        <span className="text-xs whitespace-nowrap">
+          {done}/{b.total}
+          {b.failed > 0 && <span className="ml-1 text-destructive">({b.failed} 失败)</span>}
+        </span>
+      </div>
+      <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+        <span className="min-w-0 truncate">{b.templateName}</span>
+        <span className="whitespace-nowrap">{formatUtcDateTime(b.createdAt)}</span>
+      </div>
+    </div>
   )
 }
 
@@ -168,6 +202,7 @@ export default function BatchesPage() {
         emptyText="还没有 batch"
         toolbarSlot={(table) => <BatchFilters table={table} templateNames={templateNames} />}
         bulkSlot={(table) => <BatchesBulkActions table={table} />}
+        renderCard={(row) => <BatchCard row={row} />}
       />
     </div>
   )
