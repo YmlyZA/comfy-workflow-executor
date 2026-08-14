@@ -89,11 +89,11 @@ export default function BatchNewPage() {
   return (
     <div className="space-y-6">
       <h1 className="text-xl font-semibold">New Batch</h1>
-      <div className="flex items-end gap-4 rounded-lg border bg-card p-4">
-        <div className="space-y-1">
+      <div className="flex flex-wrap items-end gap-4 rounded-lg border bg-card p-4">
+        <div className="w-full space-y-1 md:w-auto">
           <Label>模板</Label>
           <Select value={templateId} onValueChange={(v) => { setTemplateId(v); setJobs([]); setInitialRows(undefined) }}>
-            <SelectTrigger className="w-64">
+            <SelectTrigger className="w-full md:w-64">
               <SelectValue placeholder="选择模板" />
             </SelectTrigger>
             <SelectContent>
@@ -105,9 +105,9 @@ export default function BatchNewPage() {
             </SelectContent>
           </Select>
         </div>
-        <div className="space-y-1">
+        <div className="w-full space-y-1 md:w-auto">
           <Label>Batch 名称</Label>
-          <Input className="w-64" value={name} onChange={(e) => setName(e.target.value)} />
+          <Input className="w-full md:w-64" value={name} onChange={(e) => setName(e.target.value)} />
         </div>
       </div>
       {fromError && <p className="text-sm text-destructive">{fromError}</p>}
@@ -511,7 +511,7 @@ function ImagesEntry({
           )}
         </div>
       )}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         {otherParams
           .filter(
             (p) =>

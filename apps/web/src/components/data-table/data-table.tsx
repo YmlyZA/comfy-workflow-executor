@@ -20,6 +20,7 @@ import {
   type Column,
   type ColumnDef,
   type ColumnFiltersState,
+  type Row,
   type RowSelectionState,
   type SortingState,
   type Table as TanstackTable,
@@ -36,6 +37,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { useMediaQuery } from '@/hooks/use-media-query'
 import { DataTablePagination } from './data-table-pagination'
 import { DataTableToolbar } from './data-table-toolbar'
 import { DndDisabledContext, SortableRow } from './sortable-rows'
@@ -101,6 +103,8 @@ interface DataTableProps<TData> {
   emptyText?: string
   toolbarSlot?: (table: TanstackTable<TData>) => React.ReactNode
   bulkSlot?: (table: TanstackTable<TData>) => React.ReactNode
+  /** 提供时,小屏(<md)下用卡片列表替换表格主体;筛选/排序/选择/分页照常生效 */
+  renderCard?: (row: Row<TData>) => React.ReactNode
   /** 提供即启用行拖拽(仅在无排序/搜索/过滤时可拖);onReorder 收到过滤前完整 id 新顺序 */
   reorder?: { onReorder: (ids: string[]) => void }
 }
@@ -113,6 +117,7 @@ export function DataTable<TData>({
   emptyText = '暂无数据',
   toolbarSlot,
   bulkSlot,
+  renderCard,
   reorder,
 }: DataTableProps<TData>) {
   const [sorting, setSorting] = React.useState<SortingState>([])
@@ -155,6 +160,9 @@ export function DataTable<TData>({
   }
 
   const rows = table.getRowModel().rows
+
+  const isMobile = useMediaQuery('(max-width: 767px)')
+  const asCards = renderCard !== undefined && isMobile
 
   const tableEl = (
     <Table>
@@ -201,7 +209,17 @@ export function DataTable<TData>({
         toolbarSlot={toolbarSlot}
         bulkSlot={bulkSlot}
       />
-      {reorder ? (
+      {asCards ? (
+        rows.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">{emptyText}</p>
+        ) : (
+          <div className="space-y-2">
+            {rows.map((row) => (
+              <React.Fragment key={row.id}>{renderCard!(row)}</React.Fragment>
+            ))}
+          </div>
+        )
+      ) : reorder ? (
         <DndDisabledContext.Provider value={dndDisabled}>
           <DndContext
             sensors={sensors}

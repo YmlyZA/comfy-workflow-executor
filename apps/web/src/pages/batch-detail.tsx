@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { DicesIcon } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import type { BatchStatus, JobStatus, ParamDef, ParamValues } from '@cwe/shared'
 import { Button } from '@/components/ui/button'
@@ -100,7 +100,7 @@ export default function BatchDetailPage() {
             <Skeleton key={i} className="h-10 w-full" />
           ))}
         </div>
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           {Array.from({ length: 8 }, (_, i) => (
             <Skeleton key={i} className="aspect-square w-full" />
           ))}
@@ -126,8 +126,9 @@ export default function BatchDetailPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      {/* 小屏固定分行(导航/名称+状态/模板/操作),避免 flex-wrap 随名字长短产生机型间不一致的断行 */}
+      <div className="flex flex-col gap-2 md:flex-row md:flex-wrap md:items-center md:justify-between">
+        <div className="flex flex-col gap-1.5 md:min-w-0 md:flex-row md:flex-wrap md:items-center md:gap-x-3 md:gap-y-1">
           <span className="flex gap-1">
             <Button
               size="sm"
@@ -146,11 +147,13 @@ export default function BatchDetailPage() {
               更新 →
             </Button>
           </span>
-          <h1 className="text-xl font-semibold">{batch.name}</h1>
-          <StatusBadge status={batch.status} />
-          <span className="text-sm text-muted-foreground">模板：{template.name}</span>
+          <span className="flex min-w-0 items-center gap-2 md:gap-3">
+            <h1 className="min-w-0 truncate text-xl font-semibold">{batch.name}</h1>
+            <StatusBadge status={batch.status} />
+          </span>
+          <span className="truncate text-sm text-muted-foreground">模板：{template.name}</span>
         </div>
-        <div className="space-x-2">
+        <div className="flex flex-wrap gap-2">
           {failed > 0 && (
             <Button variant="outline" onClick={() => act.mutate('retry-failed')} disabled={act.isPending}>
               重试失败任务（{failed}）
@@ -222,7 +225,7 @@ export default function BatchDetailPage() {
       {gallery.length > 0 && (
         <div>
           <h2 className="mb-3 font-medium">结果画廊（{gallery.length}）</h2>
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             {gallery.map(({ job, output }, i) => (
               <div key={output.path} className="group relative space-y-1">
                 <button
@@ -296,6 +299,8 @@ function Lightbox({
 }) {
   const [compare, setCompare] = useState(false)
   const [compareKey, setCompareKey] = useState<string | null>(null)
+  // 非对比模式的横向快滑翻页;对比模式下由 ImageCompare 接管指针,天然互斥
+  const swipeStart = useRef<{ x: number; y: number } | null>(null)
   const cur = items[index]
   const imgParams = cur ? imageParamsOf(imageParamDefs, cur.job.params) : []
   const hasCompare = imgParams.length > 0
@@ -335,11 +340,26 @@ function Lightbox({
           <img
             src={outputUrl(cur.output.path)}
             alt={cur.output.filename}
-            className="max-h-[70vh] w-full rounded-md object-contain"
+            draggable={false}
+            className="max-h-[70vh] w-full touch-pan-y rounded-md object-contain select-none"
+            onPointerDown={(e) => {
+              e.currentTarget.setPointerCapture(e.pointerId)
+              swipeStart.current = { x: e.clientX, y: e.clientY }
+            }}
+            onPointerUp={(e) => {
+              const s = swipeStart.current
+              swipeStart.current = null
+              if (!s) return
+              const dx = e.clientX - s.x
+              const dy = e.clientY - s.y
+              if (Math.abs(dx) < 48 || Math.abs(dx) <= Math.abs(dy)) return
+              if (dx > 0 && index > 0) onIndex(index - 1)
+              if (dx < 0 && index < items.length - 1) onIndex(index + 1)
+            }}
           />
         )}
         {comparing && imgParams.length > 1 && (
-          <span className="flex gap-1">
+          <span className="flex flex-wrap gap-1">
             {imgParams.map((p) => (
               <Button
                 key={p.key}
@@ -356,7 +376,7 @@ function Lightbox({
           {JSON.stringify(cur.job.params)}
         </p>
         <DialogFooter className="sm:justify-between">
-          <span className="flex gap-2">
+          <span className="flex flex-wrap gap-2">
             <Button size="sm" variant="outline" disabled={index === 0} onClick={() => onIndex(index - 1)}>
               ←
             </Button>
@@ -378,7 +398,7 @@ function Lightbox({
               </Button>
             )}
           </span>
-          <span className="flex gap-2">
+          <span className="flex flex-wrap gap-2">
             <Button
               size="sm"
               variant="outline"

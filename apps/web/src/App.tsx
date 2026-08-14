@@ -1,8 +1,9 @@
-import { Navigate, NavLink, Outlet, Route, Routes, useLocation } from 'react-router-dom'
+import { Link, Navigate, NavLink, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import { MonitorIcon, MoonIcon, SunIcon } from 'lucide-react'
 import { Toaster } from 'sonner'
 import { getToken } from '@/lib/api'
 import { HostStatus } from '@/components/host-status'
+import { MobileTabBar } from '@/components/mobile-tab-bar'
 import { cn } from '@/lib/utils'
 import {
   DropdownMenu,
@@ -36,32 +37,39 @@ function RequireToken() {
   const { resolved } = useTheme()
   if (!getToken()) return <Navigate to="/login" state={{ from: location }} replace />
   return (
-    <div className="mx-auto max-w-6xl p-6">
-      <nav className="mb-6 flex items-center gap-6 border-b pb-4">
-        <span className="font-semibold">Comfy Workflow Executor</span>
-        <NavLink to="/batches" className={navCls}>
-          Batches
-        </NavLink>
-        <NavLink to="/templates" className={navCls}>
-          Templates
-        </NavLink>
-        <NavLink to="/prompts" className={navCls}>
-          Prompt 库
-        </NavLink>
-        <NavLink to="/backup" className={navCls}>
-          数据备份
-        </NavLink>
-        <NavLink to="/hosts" className={navCls}>
-          GPU 主机
-        </NavLink>
-        <NavLink to="/maintenance" className={navCls}>
-          维护
-        </NavLink>
+    <div className="mx-auto max-w-6xl p-4 pb-[calc(5rem_+_env(safe-area-inset-bottom))] md:p-6 md:pb-6">
+      <nav className="mb-4 flex items-center gap-3 border-b pb-3 md:mb-6 md:gap-6 md:pb-4">
+        {/* 品牌区:图标常显(小屏只显图标防挤压主机名),点击回主页 */}
+        <Link to="/batches" className="flex min-w-0 items-center gap-2">
+          <img src="/icon.svg" alt="Comfy Workflow Executor" className="size-7 rounded-md" />
+          <span className="hidden font-semibold md:block">Comfy Workflow Executor</span>
+        </Link>
+        <div className="hidden items-center gap-6 md:flex">
+          <NavLink to="/batches" className={navCls}>
+            Batches
+          </NavLink>
+          <NavLink to="/templates" className={navCls}>
+            Templates
+          </NavLink>
+          <NavLink to="/prompts" className={navCls}>
+            Prompt 库
+          </NavLink>
+          <NavLink to="/backup" className={navCls}>
+            数据备份
+          </NavLink>
+          <NavLink to="/hosts" className={navCls}>
+            GPU 主机
+          </NavLink>
+          <NavLink to="/maintenance" className={navCls}>
+            维护
+          </NavLink>
+        </div>
         <ThemeToggle />
         <HostStatus />
       </nav>
       <Outlet />
-      <Toaster richColors position="bottom-right" theme={resolved} />
+      <MobileTabBar />
+      <Toaster richColors position="bottom-right" theme={resolved} mobileOffset={{ bottom: 80 }} />
     </div>
   )
 }
