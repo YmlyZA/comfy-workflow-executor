@@ -1,13 +1,24 @@
+import { Link } from 'react-router-dom'
 import { useHosts } from '@/hooks/use-comfy-status'
 import { hasUsableHost } from '@/lib/hosts'
 
-/** 无可用主机且页面存在未完成任务时的提示横幅(executor 本就离线等待,这里只是可视化) */
+/** 没有任何「参与调度且在线」的主机、且页面存在未完成任务时的提示横幅 */
 export function OfflineBanner({ hasActiveWork }: { hasActiveWork: boolean }) {
   const hosts = useHosts()
-  if (!hosts || hasUsableHost(hosts) || !hasActiveWork) return null
+  if (!hosts || !hasActiveWork || hasUsableHost(hosts)) return null
+  const allDisabled = hosts.length > 0 && hosts.every((h) => h.enabled !== 1)
   return (
     <div className="rounded-md border border-warning/40 bg-warning/10 px-4 py-2 text-sm text-warning">
-      GPU 主机离线，任务将在主机恢复后自动继续。
+      {allDisabled ? (
+        <>
+          所有主机均已停用调度，任务无人执行。
+          <Link to="/hosts" className="ml-1 underline">
+            前往主机管理
+          </Link>
+        </>
+      ) : (
+        '当前没有在线的调度主机，任务将在主机恢复后自动继续。'
+      )}
     </div>
   )
 }

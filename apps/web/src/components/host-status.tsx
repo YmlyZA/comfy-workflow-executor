@@ -1,66 +1,78 @@
-import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { Progress } from '@/components/ui/progress'
 import { useHostFeed, useHosts } from '@/hooks/use-comfy-status'
-import { fetchHostStats } from '@/lib/api'
-import { referenceHost } from '@/lib/hosts'
+import { fetchHostStats, type HostDto } from '@/lib/api'
+import { onlineSummary, referenceHost } from '@/lib/hosts'
 import { cn } from '@/lib/utils'
+import { useState } from 'react'
 
-/** Header 常驻:在线状态点+当前主机名;hover 出详情卡,点击进主机管理页 */
+/** Header 常驻:参与调度主机的在线聚合;hover 出逐台清单与参考主机详情,点击进主机管理页 */
 export function HostStatus() {
   useHostFeed()
   const hosts = useHosts()
-  // 过渡期:仍按单主机呈现,取参考主机的在线态/名称。多主机汇总由 Task 10/11 接管。
-  const refHost = hosts ? referenceHost(hosts) : undefined
-  const status = hosts ? { online: refHost?.online ?? null, hostName: refHost?.name ?? null } : undefined
   const [open, setOpen] = useState(false)
-  // 离线→在线翻转的一瞬,绿灯外圈 ping 一次(600ms 后移除)
-  const [justOnline, setJustOnline] = useState(false)
-  const prevOnline = useRef<boolean | null>(null)
-  useEffect(() => {
-    if (prevOnline.current === false && status?.online) {
-      setJustOnline(true)
-      const t = setTimeout(() => setJustOnline(false), 600)
-      return () => clearTimeout(t)
-    }
-    prevOnline.current = status?.online ?? null
-  }, [status?.online])
-  useEffect(() => {
-    prevOnline.current = status?.online ?? null
-  })
 
+  const summary = hosts ? onlineSummary(hosts) : null
   const color =
-    status == null
+    summary == null
       ? 'bg-muted-foreground'
-      : status.online
-        ? 'bg-success'
-        : 'bg-destructive animate-pulse'
+      : summary.online === 0
+        ? 'bg-destructive animate-pulse'
+        : summary.online < summary.total
+          ? 'bg-warning'
+          : 'bg-success'
 
   return (
     <HoverCard open={open} onOpenChange={setOpen} openDelay={200} closeDelay={100}>
       <HoverCardTrigger asChild>
         <Link to="/hosts" className="flex items-center gap-2 text-sm">
-          <span className="relative flex size-2.5">
-            {justOnline && (
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-75" />
-            )}
-            <span className={cn('relative inline-flex size-2.5 rounded-full', color)} />
-          </span>
+          <span className={cn('inline-flex size-2.5 rounded-full', color)} />
           <span className="text-muted-foreground transition-colors duration-150 hover:text-foreground">
-            {status?.hostName ?? 'GPU 主机'}
+            {summary ? `${summary.online}/${summary.total} 台在线` : 'GPU 主机'}
           </span>
         </Link>
       </HoverCardTrigger>
-      <HoverCardContent align="end">
-        <HostStatsCard enabled={open} online={status?.online ?? null} />
+      <HoverCardContent align="end" className="w-72">
+        <HostList hosts={hosts} open={open} />
       </HoverCardContent>
     </HoverCard>
   )
 }
 
-function HostStatsCard({ enabled, online }: { enabled: boolean; online: boolean | null }) {
+function HostList({ hosts, open }: { hosts: HostDto[] | undefined; open: boolean }) {
+  const reference = hosts ? referenceHost(hosts) : undefined
+  if (!hosts) return <p className="text-sm text-muted-foreground">加载中…</p>
+  if (hosts.length === 0) return <p className="text-sm text-muted-foreground">尚未添加主机</p>
+  return (
+    <div className="space-y-3">
+      <ul className="space-y-1.5">
+        {hosts.map((h) => (
+          <li key={h.id} className="flex items-center gap-2 text-sm">
+            <span
+              className={cn(
+                'inline-flex size-2 shrink-0 rounded-full',
+                h.online === true ? 'bg-success' : h.online === false ? 'bg-destructive' : 'bg-muted-foreground',
+              )}
+            />
+            <span className="min-w-0 flex-1 truncate">{h.name}</span>
+            {h.active === 1 && <span className="text-xs text-muted-foreground">参考</span>}
+            {h.enabled !== 1 && <span className="text-xs text-muted-foreground">未调度</span>}
+          </li>
+        ))}
+      </ul>
+      {reference && (
+        <div className="border-t pt-2">
+          <ReferenceStats enabled={open} online={reference.online} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** 参考主机的详情:显存/队列/扩展 */
+function ReferenceStats({ enabled, online }: { enabled: boolean; online: boolean | null }) {
   const { data, isError } = useQuery({
     queryKey: ['host-stats'],
     queryFn: fetchHostStats,
@@ -68,7 +80,7 @@ function HostStatsCard({ enabled, online }: { enabled: boolean; online: boolean 
     staleTime: 30_000,
   })
   if (online === false || isError || data?.online === false)
-    return <p className="text-sm text-muted-foreground">主机离线或不可达</p>
+    return <p className="text-sm text-muted-foreground">参考主机离线或不可达</p>
   if (!data) return <p className="text-sm text-muted-foreground">加载中…</p>
   const used =
     data.vramTotalMB != null && data.vramFreeMB != null ? data.vramTotalMB - data.vramFreeMB : null
