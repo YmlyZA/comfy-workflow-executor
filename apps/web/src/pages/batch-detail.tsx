@@ -182,8 +182,9 @@ export default function BatchDetailPage() {
       </div>
 
       {batch.pinnedHostId != null &&
+        hosts &&
         (() => {
-          const pinned = hosts?.find((h) => h.id === batch.pinnedHostId)
+          const pinned = hosts.find((h) => h.id === batch.pinnedHostId)
           const usable = pinned && pinned.enabled === 1 && pinned.online === true
           if (usable) return null
           return (
