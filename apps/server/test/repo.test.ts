@@ -42,23 +42,23 @@ describe('templates', () => {
 describe('claimNextJob', () => {
   it('claims jobs in order and marks batch running', () => {
     const { b } = seedBatch()
-    const c1 = repo.claimNextJob(db)
+    const c1 = repo.claimNextJob(db, 1)
     expect(c1?.job.params).toEqual({ prompt: 'a' })
     expect(c1?.job.status).toBe('running')
     expect(c1?.template.name).toBe('T')
     expect(repo.getBatchDetail(db, b.id)?.batch.status).toBe('running')
-    const c2 = repo.claimNextJob(db)
+    const c2 = repo.claimNextJob(db, 1)
     expect(c2?.job.params).toEqual({ prompt: 'b' })
   })
 
   it('returns undefined when nothing pending', () => {
-    expect(repo.claimNextJob(db)).toBeUndefined()
+    expect(repo.claimNextJob(db, 1)).toBeUndefined()
   })
 
   it('skips jobs of canceled batches', () => {
     const { b } = seedBatch()
     repo.cancelBatch(db, b.id)
-    expect(repo.claimNextJob(db)).toBeUndefined()
+    expect(repo.claimNextJob(db, 1)).toBeUndefined()
   })
 
   it('leaves job pending when template row is gone', () => {
@@ -67,7 +67,7 @@ describe('claimNextJob', () => {
     // foreign_keys=ON now prevents deleteTemplate from doing this normally.
     // drizzle-orm's better-sqlite3 driver exposes the raw Database as $client.
     ;(db as any).$client.exec('PRAGMA foreign_keys=OFF; DELETE FROM templates; PRAGMA foreign_keys=ON')
-    expect(repo.claimNextJob(db)).toBeUndefined()
+    expect(repo.claimNextJob(db, 1)).toBeUndefined()
     const rows = db.select().from(jobs).where(eq(jobs.batchId, b.id)).all()
     expect(rows.every((j) => j.status === 'pending')).toBe(true)
   })
@@ -76,7 +76,7 @@ describe('claimNextJob', () => {
 describe('finish/fail guards', () => {
   it('finishJob only applies to running jobs', () => {
     const { b } = seedBatch([{ prompt: 'a' }])
-    const { job } = repo.claimNextJob(db)!
+    const { job } = repo.claimNextJob(db, 1)!
     repo.finishJob(db, job.id, [{ path: '1/0.png', filename: '0.png' }])
     const detail = repo.getBatchDetail(db, b.id)!
     expect(detail.jobs[0]?.status).toBe('succeeded')
@@ -85,7 +85,7 @@ describe('finish/fail guards', () => {
 
   it('failJob does not overwrite canceled job', () => {
     const { b } = seedBatch([{ prompt: 'a' }])
-    const { job } = repo.claimNextJob(db)!
+    const { job } = repo.claimNextJob(db, 1)!
     repo.cancelBatch(db, b.id) // running job 状态置 canceled
     repo.failJob(db, job.id, 'boom')
     expect(repo.getBatchDetail(db, b.id)!.jobs[0]?.status).toBe('canceled')
@@ -95,7 +95,7 @@ describe('finish/fail guards', () => {
 describe('batch lifecycle', () => {
   it('markBatchCompletedIfDone completes when all jobs terminal', () => {
     const { b } = seedBatch([{ prompt: 'a' }])
-    const { job } = repo.claimNextJob(db)!
+    const { job } = repo.claimNextJob(db, 1)!
     expect(repo.markBatchCompletedIfDone(db, b.id)).toBe(false)
     repo.finishJob(db, job.id, [])
     expect(repo.markBatchCompletedIfDone(db, b.id)).toBe(true)
@@ -104,7 +104,7 @@ describe('batch lifecycle', () => {
 
   it('cancelBatch cancels pending+running jobs and returns running one', () => {
     const { b } = seedBatch()
-    const { job } = repo.claimNextJob(db)!
+    const { job } = repo.claimNextJob(db, 1)!
     const running = repo.cancelBatch(db, b.id)
     expect(running?.id).toBe(job.id)
     const statuses = repo.getBatchDetail(db, b.id)!.jobs.map((j) => j.status)
@@ -113,7 +113,7 @@ describe('batch lifecycle', () => {
 
   it('retryFailedJobs resets failed to pending and reopens batch', () => {
     const { b } = seedBatch([{ prompt: 'a' }])
-    const { job } = repo.claimNextJob(db)!
+    const { job } = repo.claimNextJob(db, 1)!
     repo.failJob(db, job.id, 'boom')
     repo.markBatchCompletedIfDone(db, b.id)
     expect(repo.retryFailedJobs(db, b.id)).toBe(1)
@@ -121,12 +121,12 @@ describe('batch lifecycle', () => {
     expect(detail.jobs[0]?.status).toBe('pending')
     expect(detail.jobs[0]?.error).toBeNull()
     expect(detail.batch.status).toBe('running')
-    expect(repo.claimNextJob(db)?.job.id).toBe(job.id)
+    expect(repo.claimNextJob(db, 1)?.job.id).toBe(job.id)
   })
 
   it('listBatches includes template name and counts', () => {
     const { b } = seedBatch()
-    const { job } = repo.claimNextJob(db)!
+    const { job } = repo.claimNextJob(db, 1)!
     repo.finishJob(db, job.id, [])
     const rows = repo.listBatches(db)
     expect(rows[0]).toMatchObject({ id: b.id, templateName: 'T', total: 2, succeeded: 1, failed: 0 })
@@ -134,11 +134,11 @@ describe('batch lifecycle', () => {
 
   it('recovery helpers list and reset running jobs', () => {
     seedBatch([{ prompt: 'a' }])
-    const { job } = repo.claimNextJob(db)!
+    const { job } = repo.claimNextJob(db, 1)!
     expect(repo.listRunningJobs(db).map((j) => j.id)).toEqual([job.id])
     repo.resetJobToPending(db, job.id)
     expect(repo.listRunningJobs(db)).toHaveLength(0)
-    expect(repo.claimNextJob(db)?.job.id).toBe(job.id)
+    expect(repo.claimNextJob(db, 1)?.job.id).toBe(job.id)
   })
 })
 

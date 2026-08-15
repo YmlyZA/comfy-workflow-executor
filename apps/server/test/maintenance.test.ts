@@ -167,11 +167,11 @@ describe('repo.listAllGpuRefKeys', () => {
   it('收集全库 gpu 引用键,无 gpu 字段的输出跳过', () => {
     const t = repo.createTemplate(db, { name: 'T', comfyJson: {}, params: [] })
     const b = repo.createBatch(db, t.id, { name: 'B', jobs: [{}, {}] })
-    const c1 = repo.claimNextJob(db)!
+    const c1 = repo.claimNextJob(db, 1)!
     repo.finishJob(db, c1.job.id, [
       { path: `${b.id}/0-0-a.png`, filename: '0-0-a.png', gpu: { filename: 'a.png', subfolder: 'sub' } },
     ])
-    const c2 = repo.claimNextJob(db)!
+    const c2 = repo.claimNextJob(db, 1)!
     repo.finishJob(db, c2.job.id, [{ path: `${b.id}/1-0-b.png`, filename: '1-0-b.png' }])
     expect(repo.listAllGpuRefKeys(db)).toEqual(new Set(['sub/a.png']))
   })
@@ -184,7 +184,7 @@ describe('GPU 孤儿扫描与清理', () => {
   function seedRefs() {
     const t = repo.createTemplate(db, { name: 'T', comfyJson: {}, params: [] })
     const b = repo.createBatch(db, t.id, { name: 'B', jobs: [{}] })
-    const c1 = repo.claimNextJob(db)!
+    const c1 = repo.claimNextJob(db, 1)!
     repo.finishJob(db, c1.job.id, [
       { path: `${b.id}/0-0-a.png`, filename: '0-0-a.png', gpu: { filename: 'a.png', subfolder: '' } },
     ])

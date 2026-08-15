@@ -23,6 +23,7 @@ export interface ExecutorDeps {
   events: EventEmitter
   dataDir: string
   pollMs?: number
+  hostId: number
 }
 
 export class Executor {
@@ -31,6 +32,8 @@ export class Executor {
   private readonly events: EventEmitter
   private readonly dataDir: string
   private readonly pollMs: number
+  // 临时字段:Task 3 会把 Executor 改造成多主机并行的实例,届时这里会被正式接管
+  private readonly hostId: number
   private readonly clientId = randomUUID()
   private running = false
   private currentJobId: number | null = null
@@ -46,6 +49,7 @@ export class Executor {
     this.events = deps.events
     this.dataDir = deps.dataDir
     this.pollMs = deps.pollMs ?? 2000
+    this.hostId = deps.hostId
   }
 
   /** 起循环。已在跑时直接返回:重复 start 会起出第二个 loop(其中一个成孤儿,
@@ -120,7 +124,7 @@ export class Executor {
 
   /** 处理一个 pending job；无任务返回 false。测试入口。 */
   async runPendingOnce(): Promise<boolean> {
-    const claimed = repo.claimNextJob(this.db)
+    const claimed = repo.claimNextJob(this.db, this.hostId)
     if (!claimed) return false
     const { job, template } = claimed
     this.currentJobId = job.id
