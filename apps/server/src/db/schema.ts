@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import type { OutputFile, ParamDef, ParamValues } from '@cwe/shared'
 
 export const templates = sqliteTable('templates', {
@@ -17,6 +17,8 @@ export const batches = sqliteTable('batches', {
   name: text('name').notNull(),
   status: text('status').$type<'pending' | 'running' | 'completed' | 'canceled'>().notNull().default('pending'),
   createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+  /** 非空时该批次只在此主机执行:引用了 GPU 侧已有文件,换主机必失败 */
+  pinnedHostId: integer('pinned_host_id'),
 })
 
 export const jobs = sqliteTable('jobs', {
@@ -59,7 +61,15 @@ export const hosts = sqliteTable('hosts', {
   name: text('name').notNull(),
   url: text('url').notNull(),
   note: text('note'),
+  /** 参考主机:只服务节点/模型/GPU 文件列表查询,不再决定谁干活 */
   active: integer('active').notNull().default(0),
+  /** 参与调度:为 1 才会起 worker */
+  enabled: integer('enabled').notNull().default(1),
+  kind: text('kind').$type<'resident' | 'rental'>().notNull().default('resident'),
+  rentedAt: text('rented_at'),
+  hourlyRate: real('hourly_rate'),
+  /** 自动停用原因(熔断写入);手动启用时清空 */
+  disabledReason: text('disabled_reason'),
   createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
 })
 

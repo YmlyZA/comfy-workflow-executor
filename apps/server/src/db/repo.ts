@@ -73,6 +73,7 @@ export function listBatches(
       name: batches.name,
       status: batches.status,
       createdAt: batches.createdAt,
+      pinnedHostId: batches.pinnedHostId,
       templateName: templates.name,
       total: sql<number>`count(${jobs.id})`,
       succeeded: sql<number>`sum(case when ${jobs.status} = 'succeeded' then 1 else 0 end)`,
@@ -124,17 +125,23 @@ export function getActiveHost(db: Db): Host | undefined {
   return db.select().from(hosts).where(eq(hosts.active, 1)).get()
 }
 
-export function createHost(
-  db: Db,
-  input: { name: string; url: string; note?: string | null },
-): Host {
+export interface HostWritable {
+  name: string
+  url: string
+  note?: string | null
+  kind?: 'resident' | 'rental'
+  rentedAt?: string | null
+  hourlyRate?: number | null
+}
+
+export function createHost(db: Db, input: HostWritable): Host {
   return db.insert(hosts).values(input).returning().get()
 }
 
 export function updateHost(
   db: Db,
   id: number,
-  patch: { name?: string; url?: string; note?: string | null },
+  patch: Partial<HostWritable>,
 ): Host | undefined {
   return db.update(hosts).set(patch).where(eq(hosts.id, id)).returning().get()
 }
