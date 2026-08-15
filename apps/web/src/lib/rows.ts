@@ -26,12 +26,9 @@ export function toJobs(rows: EntryRow[]): ParamValues[] {
   return rows.filter((r) => Object.keys(r.values).length > 0).map((r) => r.values)
 }
 
-/** 行内补丁:只重建目标行,其余行对象身份保持不变 */
-export function patchRow(
-  rows: EntryRow[],
-  id: string,
-  patch: ParamValues,
-): EntryRow[] {
+/** 行内补丁:只重建目标行,其余行对象身份保持不变;无匹配行时连数组身份一起保持(不触发重渲染) */
+export function patchRow(rows: EntryRow[], id: string, patch: ParamValues): EntryRow[] {
+  if (!rows.some((r) => r.id === id)) return rows
   return rows.map((r) => (r.id === id ? { id: r.id, values: { ...r.values, ...patch } } : r))
 }
 

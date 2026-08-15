@@ -50,9 +50,9 @@ describe('patchRow', () => {
     expect(next[1]).toBe(other)
   })
 
-  it('id 不存在时原样返回各行', () => {
+  it('id 不存在时连数组身份一起原样返回', () => {
     const rows: EntryRow[] = [{ id: 'r0', values: { w: 512 } }]
-    expect(patchRow(rows, 'nope', { w: 1 })).toEqual(rows)
+    expect(patchRow(rows, 'nope', { w: 1 })).toBe(rows)
   })
 })
 

@@ -318,7 +318,11 @@ function TableEntry({
                 </TableCell>
               ))}
               <TableCell>
-                <Button size="sm" variant="ghost" onClick={() => update(removeRow(rows, id))}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setRows((prev) => removeRow(prev, id))}
+                >
                   ✕
                 </Button>
               </TableCell>
@@ -327,7 +331,7 @@ function TableEntry({
         </TableBody>
       </Table>
       <div className="flex gap-2">
-        <Button size="sm" variant="outline" onClick={() => update(appendRow(rows, nextId))}>
+        <Button size="sm" variant="outline" onClick={() => setRows((prev) => appendRow(prev, nextId))}>
           + 加一行
         </Button>
         <Button size="sm" variant="outline" onClick={() => setCsvOpen((v) => !v)}>

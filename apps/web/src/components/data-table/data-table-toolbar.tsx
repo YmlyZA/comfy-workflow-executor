@@ -11,12 +11,27 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 
-/** 全选勾选框:表格模式在表头,卡片模式(无表头)在工具栏,两处语义必须一致 */
+/**
+ * 全选勾选框:表格模式在表头,卡片模式(无表头)在工具栏,两处语义必须一致。
+ * 勾选作用于「过滤后的全部行(跨页)」——不能用 toggleAllRowsSelected,它会连同被过滤掉的
+ * 行一起选上,而勾选态/计数/批量操作读的都是过滤后的模型,过滤一清就冒出一批意外选中项。
+ */
 export function SelectAllCheckbox<TData>({ table }: { table: TanstackTable<TData> }) {
   return (
     <Checkbox
       checked={table.getIsAllRowsSelected() || (table.getIsSomeRowsSelected() && 'indeterminate')}
-      onCheckedChange={(v) => table.toggleAllRowsSelected(!!v)}
+      onCheckedChange={(v) =>
+        table.setRowSelection(
+          v
+            ? Object.fromEntries(
+                table
+                  .getFilteredRowModel()
+                  .rows.filter((r) => r.getCanSelect())
+                  .map((r) => [r.id, true]),
+              )
+            : {},
+        )
+      }
       aria-label="全选"
     />
   )

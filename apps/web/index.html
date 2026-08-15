@@ -19,7 +19,7 @@
             (t !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)
           if (dark) document.documentElement.classList.add('dark')
           // 首帧就把浏览器 UI 色刷成存储偏好对应的值(上面两条媒体查询版只认系统偏好);
-          // 色值与 src/lib/theme.ts 的 THEME_COLORS 同源,改动需两处同步。
+          // 色值与 src/lib/theme.ts 的 THEME_COLORS 同源(那里注明了第三处副本),改动需同步。
           var c = dark ? '#020617' : '#f8fafc'
           document.querySelectorAll('meta[name="theme-color"]').forEach(function (m) {
             m.content = c
