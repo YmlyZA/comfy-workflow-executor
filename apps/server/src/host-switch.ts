@@ -36,7 +36,9 @@ export async function reconnectComfy(
   const client = createComfyClient(host.url)
   deps.comfy = client
   deps.objectInfo?.invalidate()
-  deps.executor?.resume(deps.db, client)
+  // 过渡期写法:池不再围着单一 client 转,client 参数已无意义;Task 6 会整段移除这行,
+  // 改由调用方直接对目标主机 syncFromDb/restartWorker
+  deps.executor?.resumeAll(deps.db)
   const online = await client.isUp()
   deps.events.emit('event', {
     type: 'comfy-status',

@@ -5,12 +5,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import archiver from 'archiver'
 import Database from 'better-sqlite3'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, type AppDeps } from '../src/app.js'
 import { loadConfig } from '../src/config.js'
-import { createDb } from '../src/db/index.js'
+import { createDb, type Db } from '../src/db/index.js'
 import * as repo from '../src/db/repo.js'
+import { ExecutorPool } from '../src/executor-pool.js'
 import { extractZip } from '../src/zip.js'
+import { FakeComfy } from './fake-comfy.js'
 
 const H = { Authorization: 'Bearer secret' }
 
@@ -26,6 +28,23 @@ function makeApp(dataDir: string) {
     executor: null,
   }
   return { app: createApp(deps), deps }
+}
+
+/** 造一个「不真的跑 worker」的 ExecutorPool:pauseAll/resumeAll 替换成调用方传入的记录逻辑,
+ * 保持与原先手写 { pause, resume } 桩等价的断言能力 */
+function fakePool(
+  db: Db,
+  events: EventEmitter,
+  dataDir: string,
+  impls: {
+    pauseAll?: (opts?: { abandon?: boolean }) => Promise<void>
+    resumeAll?: (db: Db) => void
+  },
+): ExecutorPool {
+  const pool = new ExecutorPool({ db, events, dataDir, comfyFactory: () => new FakeComfy() })
+  if (impls.pauseAll) vi.spyOn(pool, 'pauseAll').mockImplementation(impls.pauseAll)
+  if (impls.resumeAll) vi.spyOn(pool, 'resumeAll').mockImplementation(impls.resumeAll)
+  return pool
 }
 
 let dataDir: string
@@ -117,15 +136,15 @@ describe('POST /api/import', () => {
     const calls: string[] = []
     let resumedDb: unknown = null
     const oldDb = deps.db
-    deps.executor = {
-      pause: async () => {
+    deps.executor = fakePool(deps.db, deps.events, dataDir, {
+      pauseAll: async () => {
         calls.push('pause')
       },
-      resume: (db) => {
+      resumeAll: (db) => {
         calls.push('resume')
         resumedDb = db
       },
-    }
+    })
     const zip = await buildBackupZip('X')
     const res = await app.request('/api/import', { method: 'POST', headers: HZ, body: new Uint8Array(zip) })
     expect(res.status).toBe(200)
@@ -141,8 +160,8 @@ describe('POST /api/import', () => {
       release = r
     })
     let first = true
-    deps.executor = {
-      pause: async () => {
+    deps.executor = fakePool(deps.db, deps.events, dataDir, {
+      pauseAll: async () => {
         calls.push('pause-start')
         if (first) {
           first = false
@@ -150,8 +169,8 @@ describe('POST /api/import', () => {
         }
         calls.push('pause-end')
       },
-      resume: () => calls.push('resume'),
-    }
+      resumeAll: () => calls.push('resume'),
+    })
     repo.ensureActiveHost(deps.db, 'http://a:8188')
     const other = repo.createHost(deps.db, { name: 'B', url: 'http://b:8188' })
     const zip = await buildBackupZip('LOCKED')

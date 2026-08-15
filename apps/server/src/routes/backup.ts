@@ -85,7 +85,7 @@ export function backupRoutes(deps: AppDeps) {
       // 整段进锁:与主机切换(activate / 改 active URL)互斥,否则两边各自 pause→resume
       // 会同时起两个 executor loop(详见 host-switch.ts)
       await lock.run(async () => {
-        await deps.executor?.pause()
+        await deps.executor?.pauseAll()
         deps.db.$client.close()
         const bak = join(dataDir, `.bak-${stamp}`)
         try {

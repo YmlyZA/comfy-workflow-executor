@@ -8,8 +8,7 @@ import { createComfyClient } from './comfy/client.js'
 import { loadConfig } from './config.js'
 import { createDb } from './db/index.js'
 import { ensureActiveHost } from './db/repo.js'
-import { Executor } from './executor.js'
-import type { ExecutorPool } from './executor-pool.js'
+import { ExecutorPool } from './executor-pool.js'
 import { startHostMonitor } from './host-monitor.js'
 
 const config = loadConfig()
@@ -21,8 +20,6 @@ const activeHost = ensureActiveHost(db, config.comfyUrl)
 const events = new EventEmitter()
 const comfy = createComfyClient(activeHost.url)
 // deps 对象与 app/executor/monitor 共享:热切换靠替换 deps.db / deps.comfy
-// TODO(Task 8): 这里仍是改造前的单 Executor,先用类型断言让 AppDeps.executor(已提前
-// 改为 ExecutorPool 类型,供 Task 6 路由使用)编译通过;真正换成 ExecutorPool 由 Task 8 接线。
 const deps = { config, db, comfy, events, executor: null as ExecutorPool | null }
 const app = createApp(deps)
 
@@ -31,18 +28,11 @@ if (existsSync('./public')) {
   app.get('/*', serveStatic({ path: './public/index.html' })) // SPA fallback
 }
 
-// hostId 暂时固定为当前 active host;Task 4 会改造成每主机一个 Executor 实例(pool)
-const executor = new Executor({
-  db,
-  comfy,
-  events,
-  dataDir: config.dataDir,
-  hostId: activeHost.id,
-  hostName: activeHost.name,
-  hostKind: activeHost.kind,
-})
-deps.executor = executor as unknown as ExecutorPool
-executor.start()
+// 每台 enabled 主机一个 worker;先收无主的 running job,再按 hosts 表对齐 worker 集合
+const pool = new ExecutorPool({ db, events, dataDir: config.dataDir, comfyFactory: createComfyClient })
+pool.reclaimOrphans()
+pool.syncFromDb()
+deps.executor = pool
 startHostMonitor(deps)
 
 serve({ fetch: app.fetch, port: config.port }, (info) => {

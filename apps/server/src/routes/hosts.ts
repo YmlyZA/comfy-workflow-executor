@@ -80,13 +80,13 @@ export function hostRoutes(deps: AppDeps) {
         return c.json({ host })
       }
       // 改 active 主机的 URL = 租用 pod 换地址:等待模式重连(详见 host-switch.ts)
-      await deps.executor?.pause()
+      await deps.executor?.pauseAll()
       const host = repo.updateHost(deps.db, id, patch)!
       try {
         await reconnectComfy(deps, host)
       } catch {
         // 当前实现的探测/广播不会抛;防御未来改动:表变更已提交,确保 executor 恢复运转
-        deps.executor?.resume(deps.db)
+        deps.executor?.resumeAll(deps.db)
       }
       return c.json({ host })
     })
@@ -114,13 +114,13 @@ export function hostRoutes(deps: AppDeps) {
       if (!target) return c.json({ error: 'host 不存在' }, 404)
       if (target.active === 1) return c.json({ host: target })
       // 先 pause 再切表:否则等待期间 executor 可能认领新 job 并盖上新主机的章
-      await deps.executor?.pause(mode === 'interrupt' ? { abandon: true } : undefined)
+      await deps.executor?.pauseAll(mode === 'interrupt' ? { abandon: true } : undefined)
       const host = repo.activateHost(deps.db, id)!
       try {
         await reconnectComfy(deps, host)
       } catch {
         // 同 PATCH:防御未来改动,保证 executor 不停留在 paused
-        deps.executor?.resume(deps.db)
+        deps.executor?.resumeAll(deps.db)
       }
       return c.json({ host })
     })

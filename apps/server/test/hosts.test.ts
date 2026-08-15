@@ -1,9 +1,10 @@
 import { EventEmitter } from 'node:events'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, type AppDeps } from '../src/app.js'
 import { loadConfig } from '../src/config.js'
 import { createDb, type Db } from '../src/db/index.js'
 import * as repo from '../src/db/repo.js'
+import { ExecutorPool } from '../src/executor-pool.js'
 import { FakeComfy } from './fake-comfy.js'
 
 let db: Db
@@ -12,20 +13,37 @@ let app: ReturnType<typeof createApp>
 let calls: string[]
 const H = { Authorization: 'Bearer secret', 'Content-Type': 'application/json' }
 
+/** 造一个「不真的跑 worker」的 ExecutorPool:pauseAll/resumeAll 被替换成纯记录调用顺序,
+ * 保持与原先手写 { pause, resume } 桩等价的断言能力。pauseAll 行为可覆盖(阻塞测试用)。 */
+function fakePool(
+  dataDir: string,
+  events: EventEmitter,
+  onPauseAll?: (opts?: { abandon?: boolean }) => Promise<void>,
+): ExecutorPool {
+  const pool = new ExecutorPool({ db, events, dataDir, comfyFactory: () => new FakeComfy() })
+  vi.spyOn(pool, 'pauseAll').mockImplementation(
+    onPauseAll ??
+      (async (opts?: { abandon?: boolean }) => {
+        calls.push(opts?.abandon ? 'pause-abandon' : 'pause')
+      }),
+  )
+  vi.spyOn(pool, 'resumeAll').mockImplementation(() => {
+    calls.push('resume')
+  })
+  return pool
+}
+
 beforeEach(() => {
   db = createDb(':memory:')
   calls = []
+  const config = loadConfig({ AUTH_TOKEN: 'secret' })
+  const events = new EventEmitter()
   deps = {
-    config: loadConfig({ AUTH_TOKEN: 'secret' }),
+    config,
     db,
     comfy: new FakeComfy(),
-    events: new EventEmitter(),
-    executor: {
-      pause: async (opts?: { abandon?: boolean }) => {
-        calls.push(opts?.abandon ? 'pause-abandon' : 'pause')
-      },
-      resume: () => calls.push('resume'),
-    },
+    events,
+    executor: fakePool(config.dataDir, events),
   }
   app = createApp(deps)
 })
@@ -95,17 +113,14 @@ describe('并发切换串行化', () => {
       release = r
     })
     let first = true
-    deps.executor = {
-      pause: async () => {
-        calls.push('pause-start')
-        if (first) {
-          first = false
-          await gate
-        }
-        calls.push('pause-end')
-      },
-      resume: () => calls.push('resume'),
-    }
+    deps.executor = fakePool(deps.config.dataDir, deps.events, async () => {
+      calls.push('pause-start')
+      if (first) {
+        first = false
+        await gate
+      }
+      calls.push('pause-end')
+    })
     return release
   }
 
