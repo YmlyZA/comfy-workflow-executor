@@ -565,3 +565,83 @@ describe('DELETE /api/batches/:id purgeGpu', () => {
     expect(comfy.cweDeleted).toHaveLength(0) // 不会错发到当前主机
   })
 })
+
+describe('建批自动锁定主机', () => {
+  it('image 值不在本地 uploads 时锁定到参考主机', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'cwe-pin-'))
+    mkdirSync(join(dataDir, 'uploads'), { recursive: true })
+    const localDb = createDb(':memory:')
+    const localApp = createApp({
+      config: loadConfig({ AUTH_TOKEN: 'secret', DATA_DIR: dataDir }),
+      db: localDb,
+      comfy: null,
+      events: new EventEmitter(),
+    })
+    const tpl = repo.createTemplate(localDb, {
+      name: 't-pin',
+      comfyJson: { '10': { class_type: 'LoadImage', inputs: { image: 'x.png' } } },
+      params: [{ key: 'img', label: '图', nodeId: '10', inputName: 'image', type: 'image' }],
+    })
+    const host = repo.createHost(localDb, { name: 'A', url: 'http://a:8188' })
+    repo.activateHost(localDb, host.id)
+    const res = await localApp.request(`/api/templates/${tpl.id}/batches`, {
+      method: 'POST',
+      headers: H,
+      body: JSON.stringify({ name: 'b', jobs: [{ img: 'only-on-gpu.png' }] }),
+    })
+    const batch = (await res.json()) as any
+    expect(batch.pinnedHostId).toBe(host.id)
+  })
+
+  it('image 值都是本地 uploads 文件时不锁定', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'cwe-no-pin-'))
+    const uploadsDir = join(dataDir, 'uploads')
+    mkdirSync(uploadsDir, { recursive: true })
+    writeFileSync(join(uploadsDir, 'local.png'), 'x')
+    const localDb = createDb(':memory:')
+    const localApp = createApp({
+      config: loadConfig({ AUTH_TOKEN: 'secret', DATA_DIR: dataDir }),
+      db: localDb,
+      comfy: null,
+      events: new EventEmitter(),
+    })
+    const tpl = repo.createTemplate(localDb, {
+      name: 't-local',
+      comfyJson: { '10': { class_type: 'LoadImage', inputs: { image: 'x.png' } } },
+      params: [{ key: 'img', label: '图', nodeId: '10', inputName: 'image', type: 'image' }],
+    })
+    repo.activateHost(localDb, repo.createHost(localDb, { name: 'A', url: 'http://a:8188' }).id)
+    const res = await localApp.request(`/api/templates/${tpl.id}/batches`, {
+      method: 'POST',
+      headers: H,
+      body: JSON.stringify({ name: 'b', jobs: [{ img: 'local.png' }] }),
+    })
+    const batch = (await res.json()) as any
+    expect(batch.pinnedHostId).toBeNull()
+  })
+
+  it('无 image 参数的模板不锁定', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'cwe-text-'))
+    mkdirSync(join(dataDir, 'uploads'), { recursive: true })
+    const localDb = createDb(':memory:')
+    const localApp = createApp({
+      config: loadConfig({ AUTH_TOKEN: 'secret', DATA_DIR: dataDir }),
+      db: localDb,
+      comfy: null,
+      events: new EventEmitter(),
+    })
+    const tpl = repo.createTemplate(localDb, {
+      name: 't-text',
+      comfyJson: { '6': { class_type: 'CLIPTextEncode', inputs: { text: 'x' } } },
+      params: [{ key: 'p', label: 'P', nodeId: '6', inputName: 'text', type: 'text' }],
+    })
+    repo.activateHost(localDb, repo.createHost(localDb, { name: 'A', url: 'http://a:8188' }).id)
+    const res = await localApp.request(`/api/templates/${tpl.id}/batches`, {
+      method: 'POST',
+      headers: H,
+      body: JSON.stringify({ name: 'b', jobs: [{ p: 'hi' }] }),
+    })
+    const batch = (await res.json()) as any
+    expect(batch.pinnedHostId).toBeNull()
+  })
+})

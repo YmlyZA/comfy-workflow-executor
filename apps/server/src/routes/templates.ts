@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs'
+import { isAbsolute, join } from 'node:path'
 import { Hono } from 'hono'
 import { createBatchSchema, createTemplateSchema, renameTemplateSchema } from '@cwe/shared'
 import * as repo from '../db/repo.js'
@@ -50,7 +52,20 @@ export function templateRoutes(deps: AppDeps) {
     const template = repo.getTemplate(deps.db, id)
     if (!template) return c.json({ error: 'template not found' }, 404)
     const input = createBatchSchema.parse(await c.req.json())
-    const batch = repo.createBatch(deps.db, id, input)
+    // 引用 GPU 侧已有文件(本地 uploads 没有)的任务搬不到别的主机,把整批锁到参考主机。
+    // 判据与 executor.execute 的取值逻辑保持一致:本地有就上传、没有才原样引用。
+    const referencesGpuFile = template.params
+      .filter((p) => p.type === 'image')
+      .some((def) =>
+        input.jobs.some((job) => {
+          const v = job[def.key] ?? def.default
+          if (typeof v !== 'string' || !v) return false
+          if (v.includes('..') || isAbsolute(v)) return true
+          return !existsSync(join(deps.config.dataDir, 'uploads', v))
+        }),
+      )
+    const pinnedHostId = referencesGpuFile ? (repo.getActiveHost(deps.db)?.id ?? null) : null
+    const batch = repo.createBatch(deps.db, id, input, pinnedHostId)
     // 输入历史记录失败不影响建批
     try {
       const textKeys = template.params.filter((p) => p.type === 'text').map((p) => p.key)
