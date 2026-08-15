@@ -39,7 +39,7 @@ import {
 } from '@/components/ui/table'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { DataTablePagination } from './data-table-pagination'
-import { DataTableToolbar } from './data-table-toolbar'
+import { DataTableToolbar, SelectAllCheckbox } from './data-table-toolbar'
 import { DndDisabledContext, SortableRow } from './sortable-rows'
 
 export function SortableHeader<TData>({
@@ -73,15 +73,7 @@ export function SortableHeader<TData>({
 export function selectColumn<TData>(): ColumnDef<TData> {
   return {
     id: 'select',
-    header: ({ table }) => (
-      <Checkbox
-        checked={
-          table.getIsAllRowsSelected() || (table.getIsSomeRowsSelected() && 'indeterminate')
-        }
-        onCheckedChange={(v) => table.toggleAllRowsSelected(!!v)}
-        aria-label="全选"
-      />
-    ),
+    header: ({ table }) => <SelectAllCheckbox table={table} />,
     cell: ({ row }) => (
       <Checkbox
         checked={row.getIsSelected()}
@@ -208,6 +200,7 @@ export function DataTable<TData>({
         searchPlaceholder={searchPlaceholder}
         toolbarSlot={toolbarSlot}
         bulkSlot={bulkSlot}
+        asCards={asCards}
       />
       {asCards ? (
         rows.length === 0 ? (
