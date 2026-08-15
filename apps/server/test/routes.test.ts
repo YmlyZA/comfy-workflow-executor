@@ -614,6 +614,32 @@ describe('DELETE /api/batches/:id purgeGpu', () => {
     expect(remote.interrupts).toBe(1)
   })
 
+  it('一台主机的 interrupt 迟迟不返回,不阻塞其余主机被中断', async () => {
+    const { comfy, remote, localDb, localApp, h1, h2, t } = makeTwoHostApp()
+    const b = repo.createBatch(localDb, t.id, { name: 'B', jobs: [{ prompt: 'a' }, { prompt: 'b' }] })
+    repo.claimNextJob(localDb, h1.id)
+    repo.claimNextJob(localDb, h2.id)
+    // h1(参考主机)的 interrupt 卡住不返回,模拟不可达/卡死的 ComfyUI
+    let resolveH1: () => void = () => {}
+    const h1Pending = new Promise<void>((resolve) => {
+      resolveH1 = resolve
+    })
+    comfy.interrupt = async () => {
+      comfy.interrupts++
+      await h1Pending
+    }
+    const resPromise = localApp.request(`/api/batches/${b.id}/cancel`, { method: 'POST', headers: H })
+    // 让事件循环跑一轮,给两个 interrupt 调用机会推进到各自的第一个 await
+    await new Promise((r) => setTimeout(r, 0))
+    // 回归点:串行版本下,h2 要等 h1 的 interrupt 落定才会被调用——这里 h1 还卡着,
+    // 若 h2.interrupts 仍是 0 就说明退回了串行实现
+    expect(remote.interrupts).toBe(1)
+    expect(comfy.interrupts).toBe(1)
+    resolveH1()
+    const res = await resPromise
+    expect(res.status).toBe(200)
+  })
+
   it('执行主机的行已被删除时照常取消,不报错', async () => {
     const { comfy, remote, localDb, localApp, h2, t } = makeTwoHostApp()
     const b = repo.createBatch(localDb, t.id, { name: 'B', jobs: [{ prompt: 'a' }] })

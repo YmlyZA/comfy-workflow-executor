@@ -120,9 +120,13 @@ export function batchRoutes(deps: AppDeps) {
     // interrupt 必须发给**真正在跑这个任务的那台主机**:deps.comfy 是参考主机的
     // client,而参考主机大概率正在跑别的批次——朝它发 interrupt 等于误杀无辜任务
     // (还会推高那台主机的失败连击直至熔断),而该停的主机照样把已取消的任务出完图。
-    for (const client of interruptClients(deps, repo.cancelBatch(deps.db, id))) {
-      await client.interrupt().catch(() => {})
-    }
+    // 并发发出:批次可能横跨多台主机,串行 await 的话一台不可达主机会拖住其余
+    // 主机的中断(乃至拖住本次 cancel 请求本身),各自的失败仍要各自吞掉。
+    await Promise.all(
+      interruptClients(deps, repo.cancelBatch(deps.db, id)).map((client) =>
+        client.interrupt().catch(() => {}),
+      ),
+    )
     deps.events.emit('event', { type: 'batch-updated', batchId: id, status: 'canceled' })
     return c.json({ ok: true })
   })

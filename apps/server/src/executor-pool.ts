@@ -141,8 +141,15 @@ export class ExecutorPool {
       // 不抢别人的收尾记录
       if (this.draining.get(hostId) === worker) {
         this.draining.delete(hostId)
-        // 收尾中被重新设为参与调度的主机,在这里自己回来
-        this.syncFromDb()
+        // 收尾中被重新设为参与调度的主机,在这里自己回来。这段可能跑在备份恢复
+        // 换库之后(旧 db 句柄已被关闭):drain 跨越数据库切换是正常情况,
+        // resumeAll 早晚会用新句柄重建整个池,这里的 syncFromDb 只是锦上添花,
+        // 吞掉即可,不能让它成为悬空 promise 里的未捕获异常。
+        try {
+          this.syncFromDb()
+        } catch (err) {
+          console.error(`syncFromDb after drain failed (host ${hostId})`, err)
+        }
       }
     }
   }
