@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import { parseTheme, resolveTheme, THEME_STORAGE_KEY, type Theme } from '@/lib/theme'
+import { parseTheme, resolveTheme, themeColor, THEME_STORAGE_KEY, type Theme } from '@/lib/theme'
 
 interface ThemeContextValue {
   theme: Theme
@@ -34,7 +34,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', resolved === 'dark')
-  }, [resolved])
+    // index.html 里那两条 theme-color 由 prefers-color-scheme 驱动,应用内强制主题时会跟错;
+    // JS 就位后由这里统一接管(静态那两条只作首帧兜底)。
+    const color = themeColor(theme, systemDark)
+    document
+      .querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')
+      .forEach((m) => (m.content = color))
+  }, [resolved, theme, systemDark])
 
   const setTheme = (t: Theme) => {
     setThemeState(t)

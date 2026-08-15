@@ -29,6 +29,15 @@ import { ImageValueControl } from '@/components/image-value-control'
 import { TextValueControl } from '@/components/text-value-control'
 import { MatrixEntry } from '@/components/matrix-entry'
 import { api } from '@/lib/api'
+import {
+  appendRow,
+  createRowIdGen,
+  patchRow,
+  removeRow,
+  toJobs,
+  toRows,
+  type EntryRow,
+} from '@/lib/rows'
 import { useImageDims } from '@/hooks/use-image-dims'
 import { useDebouncedValue } from '@/hooks/use-debounced-value'
 import type { TemplateDto } from '@/pages/templates'
@@ -175,7 +184,9 @@ function TableEntry({
   onChange: (jobs: ParamValues[]) => void
   initialRows?: ParamValues[]
 }) {
-  const [rows, setRows] = useState<ParamValues[]>(initialRows ?? [{}])
+  // 行 id 发号器随组件实例创建一次;切模板会 remount(Tabs key={template.id}),计数自然重置
+  const [nextId] = useState(createRowIdGen)
+  const [rows, setRows] = useState<EntryRow[]>(() => toRows(initialRows ?? [{}], nextId))
   const [csvOpen, setCsvOpen] = useState(false)
   const [csvText, setCsvText] = useState('')
   const [error, setError] = useState('')
@@ -184,18 +195,18 @@ function TableEntry({
   const [sizeMode, setSizeMode] = useState<SizeMode>('default')
   const [capText, setCapText] = useState('')
 
-  // rows → jobs 同步(过滤空行);全量 update 与函数式 patchRow 都经这里通知父级
+  // rows → jobs 同步(过滤空行);全量 update 与函数式 patchById 都经这里通知父级
   useEffect(() => {
-    onChange(rows.filter((r) => Object.keys(r).length > 0))
+    onChange(toJobs(rows))
   }, [rows, onChange])
 
-  function update(next: ParamValues[]) {
+  function update(next: EntryRow[]) {
     setRows(next)
   }
 
   /** 行内补丁:函数式更新,同一批次多个 SourceDimCell 补丁不会互相覆盖 */
-  function patchRow(i: number, patch: Record<string, string | number>) {
-    setRows((prev) => prev.map((r, j) => (j === i ? { ...r, ...patch } : r)))
+  function patchById(id: string, patch: ParamValues) {
+    setRows((prev) => patchRow(prev, id, patch))
   }
 
   function importCsv() {
@@ -212,7 +223,7 @@ function TableEntry({
       return
     }
     setError('')
-    update(imported)
+    update(toRows(imported, nextId))
     setCsvOpen(false)
   }
 
@@ -253,74 +264,65 @@ function TableEntry({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((row, i) => (
-            <TableRow key={i}>
+          {/* key 用行 id 而非下标:删行后单元格实例跟着行走,不会把手改的宽高冲掉 */}
+          {rows.map(({ id, values }) => (
+            <TableRow key={id}>
               {template.params.map((p) => (
                 <TableCell key={p.key}>
                   {p.type === 'image' ? (
                     <ImageValueControl
-                      value={String(row[p.key] ?? '')}
+                      value={String(values[p.key] ?? '')}
                       placeholder={String(p.default ?? '')}
-                      onChange={(v) => {
-                        const next = rows.map((r, j) => (j === i ? { ...r, [p.key]: v } : r))
-                        update(next)
-                      }}
+                      onChange={(v) => patchById(id, { [p.key]: v })}
                     />
                   ) : sizeMode === 'ratio' && dimPair && imageParam && (p.key === dimPair.width.key || p.key === dimPair.height.key) ? (
                     <DimCell
                       p={p}
                       otherKey={p.key === dimPair.width.key ? dimPair.height.key : dimPair.width.key}
                       driver={p.key === dimPair.width.key ? 'width' : 'height'}
-                      imageName={String(row[imageParam.key] ?? imageParam.default ?? '')}
+                      imageName={String(values[imageParam.key] ?? imageParam.default ?? '')}
                       locked={sizeMode === 'ratio'}
-                      value={String(row[p.key] ?? '')}
-                      onPatch={(patch) => patchRow(i, patch)}
+                      value={String(values[p.key] ?? '')}
+                      onPatch={(patch) => patchById(id, patch)}
                     />
                   ) : sizeMode === 'source' && dimPair && imageParam && p.key === dimPair.width.key ? (
                     <SourceDimCell
                       p={p}
                       heightKey={dimPair.height.key}
-                      imageName={String(row[imageParam.key] ?? '')}
+                      imageName={String(values[imageParam.key] ?? '')}
                       cap={parseCap(capText)}
-                      value={String(row[p.key] ?? '')}
-                      onPatch={(patch) => patchRow(i, patch)}
+                      value={String(values[p.key] ?? '')}
+                      onPatch={(patch) => patchById(id, patch)}
                     />
                   ) : p.type === 'enum' ? (
                     <EnumValueSelect
                       param={p}
-                      value={String(row[p.key] ?? '')}
-                      onChange={(v) => {
-                        const next = rows.map((r, j) => (j === i ? { ...r, [p.key]: v } : r))
-                        update(next)
-                      }}
+                      value={String(values[p.key] ?? '')}
+                      onChange={(v) => patchById(id, { [p.key]: v })}
                     />
                   ) : p.type === 'text' ? (
                     <TextValueControl
                       paramKey={p.key}
                       placeholder={String(p.default ?? '')}
-                      value={String(row[p.key] ?? '')}
-                      onChange={(v) => {
-                        const next = rows.map((r, j) => (j === i ? { ...r, [p.key]: v } : r))
-                        update(next)
-                      }}
+                      value={String(values[p.key] ?? '')}
+                      onChange={(v) => patchById(id, { [p.key]: v })}
                     />
                   ) : (
                     <Input
                       className="h-8"
                       placeholder={String(p.default ?? '')}
-                      value={String(row[p.key] ?? '')}
-                      onChange={(e) => {
-                        const next = rows.map((r, j) =>
-                          j === i ? { ...r, [p.key]: e.target.value } : r,
-                        )
-                        update(next)
-                      }}
+                      value={String(values[p.key] ?? '')}
+                      onChange={(e) => patchById(id, { [p.key]: e.target.value })}
                     />
                   )}
                 </TableCell>
               ))}
               <TableCell>
-                <Button size="sm" variant="ghost" onClick={() => update(rows.filter((_, j) => j !== i))}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setRows((prev) => removeRow(prev, id))}
+                >
                   ✕
                 </Button>
               </TableCell>
@@ -329,7 +331,7 @@ function TableEntry({
         </TableBody>
       </Table>
       <div className="flex gap-2">
-        <Button size="sm" variant="outline" onClick={() => update([...rows, {}])}>
+        <Button size="sm" variant="outline" onClick={() => setRows((prev) => appendRow(prev, nextId))}>
           + 加一行
         </Button>
         <Button size="sm" variant="outline" onClick={() => setCsvOpen((v) => !v)}>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseTheme, resolveTheme } from './theme'
+import { THEME_COLORS, parseTheme, resolveTheme, themeColor } from './theme'
 
 describe('parseTheme', () => {
   it('合法值原样返回', () => {
@@ -22,5 +22,16 @@ describe('resolveTheme', () => {
   it('system 跟随系统', () => {
     expect(resolveTheme('system', true)).toBe('dark')
     expect(resolveTheme('system', false)).toBe('light')
+  })
+})
+
+describe('themeColor', () => {
+  it('应用内强制的主题优先于系统(媒体查询版 theme-color 修不了的那个 case)', () => {
+    expect(themeColor('dark', false)).toBe(THEME_COLORS.dark)
+    expect(themeColor('light', true)).toBe(THEME_COLORS.light)
+  })
+  it('system 跟随系统', () => {
+    expect(themeColor('system', true)).toBe(THEME_COLORS.dark)
+    expect(themeColor('system', false)).toBe(THEME_COLORS.light)
   })
 })
