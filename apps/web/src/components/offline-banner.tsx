@@ -6,10 +6,18 @@ import { hasUsableHost } from '@/lib/hosts'
 export function OfflineBanner({ hasActiveWork }: { hasActiveWork: boolean }) {
   const hosts = useHosts()
   if (!hosts || !hasActiveWork || hasUsableHost(hosts)) return null
+  const noneConfigured = hosts.length === 0
   const allDisabled = hosts.length > 0 && hosts.every((h) => h.enabled !== 1)
   return (
     <div className="rounded-md border border-warning/40 bg-warning/10 px-4 py-2 text-sm text-warning">
-      {allDisabled ? (
+      {noneConfigured ? (
+        <>
+          尚未配置任何 GPU 主机。
+          <Link to="/hosts" className="ml-1 underline">
+            前往配置
+          </Link>
+        </>
+      ) : allDisabled ? (
         <>
           所有主机均已停用调度，任务无人执行。
           <Link to="/hosts" className="ml-1 underline">

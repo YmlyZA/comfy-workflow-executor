@@ -15,14 +15,23 @@ export function HostStatus() {
   const [open, setOpen] = useState(false)
 
   const summary = hosts ? onlineSummary(hosts) : null
+  // 判断启用主机的探测状态:全未探测->未知; 已探测->按真实情况分类
+  const enabledHosts = hosts?.filter((h) => h.enabled === 1) ?? []
+  const allUnprobed = enabledHosts.length > 0 && enabledHosts.every((h) => h.online === null)
+  const onlineCount = enabledHosts.filter((h) => h.online === true).length
+
   const color =
     summary == null
       ? 'bg-muted-foreground'
-      : summary.online === 0
-        ? 'bg-destructive animate-pulse'
-        : summary.online < summary.total
-          ? 'bg-warning'
-          : 'bg-success'
+      : allUnprobed
+        ? 'bg-muted-foreground'
+        : onlineCount === enabledHosts.length
+          ? 'bg-success'
+          : onlineCount > 0
+            ? 'bg-warning'
+            : 'bg-destructive animate-pulse'
+
+  const label = allUnprobed ? '尚未连接' : summary ? `${summary.online}/${summary.total} 台在线` : 'GPU 主机'
 
   return (
     <HoverCard open={open} onOpenChange={setOpen} openDelay={200} closeDelay={100}>
@@ -30,7 +39,7 @@ export function HostStatus() {
         <Link to="/hosts" className="flex items-center gap-2 text-sm">
           <span className={cn('inline-flex size-2.5 rounded-full', color)} />
           <span className="text-muted-foreground transition-colors duration-150 hover:text-foreground">
-            {summary ? `${summary.online}/${summary.total} 台在线` : 'GPU 主机'}
+            {label}
           </span>
         </Link>
       </HoverCardTrigger>
