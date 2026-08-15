@@ -3,14 +3,18 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { Progress } from '@/components/ui/progress'
-import { useComfyStatus, useComfyStatusFeed } from '@/hooks/use-comfy-status'
+import { useHostFeed, useHosts } from '@/hooks/use-comfy-status'
 import { fetchHostStats } from '@/lib/api'
+import { referenceHost } from '@/lib/hosts'
 import { cn } from '@/lib/utils'
 
 /** Header 常驻:在线状态点+当前主机名;hover 出详情卡,点击进主机管理页 */
 export function HostStatus() {
-  useComfyStatusFeed()
-  const status = useComfyStatus()
+  useHostFeed()
+  const hosts = useHosts()
+  // 过渡期:仍按单主机呈现,取参考主机的在线态/名称。多主机汇总由 Task 10/11 接管。
+  const refHost = hosts ? referenceHost(hosts) : undefined
+  const status = hosts ? { online: refHost?.online ?? null, hostName: refHost?.name ?? null } : undefined
   const [open, setOpen] = useState(false)
   // 离线→在线翻转的一瞬,绿灯外圈 ping 一次(600ms 后移除)
   const [justOnline, setJustOnline] = useState(false)

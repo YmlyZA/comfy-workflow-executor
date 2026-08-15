@@ -17,7 +17,6 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { useComfyStatus } from '@/hooks/use-comfy-status'
 import {
   activateHost,
   api,
@@ -31,12 +30,14 @@ import {
   type HostTestResult,
   errorMessage,
 } from '@/lib/api'
+import { referenceHost } from '@/lib/hosts'
 import type { BatchSummaryDto } from '@/pages/batches'
 
 export default function HostsPage() {
   const qc = useQueryClient()
-  const status = useComfyStatus()
   const { data } = useQuery({ queryKey: ['hosts'], queryFn: fetchHosts })
+  // 过渡期:仍按单主机呈现「当前主机」卡片,取参考主机。多主机管理由 Task 10/11 接管。
+  const currentHost = referenceHost(data?.hosts ?? [])
   const { data: stats } = useQuery({
     queryKey: ['host-stats'],
     queryFn: fetchHostStats,
@@ -56,7 +57,6 @@ export default function HostsPage() {
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ['hosts'] })
     void qc.invalidateQueries({ queryKey: ['host-stats'] })
-    void qc.invalidateQueries({ queryKey: ['comfy-status'] })
   }
   const onError = (e: unknown) => toast.error(errorMessage(e))
 
@@ -89,8 +89,10 @@ export default function HostsPage() {
     },
     onError,
   })
+  // 过渡期:activate 已不再接受 mode(不再影响任何 worker),两个按钮暂时行为一致。
+  // Task 10/11 会按 enabled/disable 语义重做这里的交互。
   const activate = useMutation({
-    mutationFn: ({ id, mode }: { id: number; mode: 'wait' | 'interrupt' }) => activateHost(id, mode),
+    mutationFn: (id: number) => activateHost(id),
     onSuccess: () => {
       toast.success('已切换')
       invalidate()
@@ -110,7 +112,7 @@ export default function HostsPage() {
 
   function requestSwitch(host: HostDto) {
     if (hasRunning) setSwitchTarget(host)
-    else activate.mutate({ id: host.id, mode: 'wait' })
+    else activate.mutate(host.id)
   }
 
   const hosts = data?.hosts ?? []
@@ -121,8 +123,8 @@ export default function HostsPage() {
       <section className="space-y-2 rounded-md border p-4">
         <p className="flex items-center gap-2 text-sm font-medium">
           当前主机
-          <Badge variant={status?.online ? 'default' : 'destructive'}>
-            {status == null ? '探测中' : status.online ? '在线' : '离线'}
+          <Badge variant={currentHost?.online ? 'default' : 'destructive'}>
+            {data === undefined ? '探测中' : currentHost?.online ? '在线' : '离线'}
           </Badge>
         </p>
         {stats?.online ? (
@@ -217,7 +219,7 @@ export default function HostsPage() {
               onClick={() => {
                 const h = switchTarget
                 setSwitchTarget(null)
-                if (h) activate.mutate({ id: h.id, mode: 'wait' })
+                if (h) activate.mutate(h.id)
               }}
             >
               等它跑完
@@ -226,7 +228,7 @@ export default function HostsPage() {
               onClick={() => {
                 const h = switchTarget
                 setSwitchTarget(null)
-                if (h) activate.mutate({ id: h.id, mode: 'interrupt' })
+                if (h) activate.mutate(h.id)
               }}
             >
               立即中断
