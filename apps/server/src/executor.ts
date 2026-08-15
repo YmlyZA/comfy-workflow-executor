@@ -16,6 +16,12 @@ class AbandonError extends Error {}
 
 /** 已停机(pause 等待中)时,getHistory 连续失败多少轮就判定主机已死并放弃当前 job */
 const UNREACHABLE_ABANDON_POLLS = 3
+/** 运行中的 worker:主机连续不可达超过此时长即放弃当前 job,让它回池由别的主机接手 */
+export const UNREACHABLE_ABANDON_MS = 120_000
+/** 连续多少个任务失败判定主机坏掉 */
+export const FAILURE_STREAK_LIMIT = 3
+/** 租用主机空转多久提醒一次 */
+export const IDLE_NOTIFY_MS = 300_000
 
 export interface ExecutorDeps {
   db: Db
@@ -24,6 +30,15 @@ export interface ExecutorDeps {
   dataDir: string
   pollMs?: number
   hostId: number
+  hostName: string
+  hostKind: 'resident' | 'rental'
+  /** 连续失败达 FAILURE_STREAK_LIMIT 时回调一次。worker 只上报,停机由 pool 决定 */
+  onFailureStreak?: (hostId: number) => void
+  /** 租用主机空转达阈值时回调一次 */
+  onIdle?: (hostId: number, idleMs: number) => void
+  now?: () => number
+  unreachableAbandonMs?: number
+  idleNotifyMs?: number
 }
 
 export class Executor {
@@ -32,10 +47,26 @@ export class Executor {
   private readonly events: EventEmitter
   private readonly dataDir: string
   private readonly pollMs: number
-  // 临时字段:Task 3 会把 Executor 改造成多主机并行的实例,届时这里会被正式接管
-  private readonly hostId: number
+  readonly hostId: number
+  private readonly hostName: string
+  private readonly hostKind: 'resident' | 'rental'
+  private readonly onFailureStreak?: (hostId: number) => void
+  private readonly onIdle?: (hostId: number, idleMs: number) => void
+  private readonly now: () => number
+  private readonly unreachableAbandonMs: number
+  private readonly idleNotifyMs: number
+  /** 连续失败计数;成功一次清零。内存态,worker 重启即归零 */
+  private failureStreak = 0
+  /** 本轮空闲的起点(毫秒);null = 当前不处于空闲 */
+  private idleSince: number | null = null
+  /** 本轮空闲是否已提醒过,防止每轮重复 toast */
+  private idleNotified = false
   private readonly clientId = randomUUID()
   private running = false
+  /** 是否曾经 start() 过;用于区分"从未起循环,直接调用 runPendingOnce()"(测试/单次调用)
+   * 与"起过循环,现在 stop() 了"(pause() 热切换等待收尾)—— 两者 running 都是 false,
+   * 但只有后者才该用 UNREACHABLE_ABANDON_POLLS 这套"停机等待"逻辑提前放弃 */
+  private started = false
   private currentJobId: number | null = null
   private disconnectWs: (() => void) | null = null
   private loopPromise: Promise<void> | null = null
@@ -50,6 +81,13 @@ export class Executor {
     this.dataDir = deps.dataDir
     this.pollMs = deps.pollMs ?? 2000
     this.hostId = deps.hostId
+    this.hostName = deps.hostName
+    this.hostKind = deps.hostKind
+    this.onFailureStreak = deps.onFailureStreak
+    this.onIdle = deps.onIdle
+    this.now = deps.now ?? Date.now
+    this.unreachableAbandonMs = deps.unreachableAbandonMs ?? UNREACHABLE_ABANDON_MS
+    this.idleNotifyMs = deps.idleNotifyMs ?? IDLE_NOTIFY_MS
   }
 
   /** 起循环。已在跑时直接返回:重复 start 会起出第二个 loop(其中一个成孤儿,
@@ -57,6 +95,7 @@ export class Executor {
   start(): void {
     if (this.running) return
     this.running = true
+    this.started = true
     this.disconnectWs = this.comfy.connectEvents(this.clientId, (e) => {
       if (e.type === 'progress' && this.currentJobId != null) {
         this.emit({
@@ -125,23 +164,53 @@ export class Executor {
   /** 处理一个 pending job；无任务返回 false。测试入口。 */
   async runPendingOnce(): Promise<boolean> {
     const claimed = repo.claimNextJob(this.db, this.hostId)
-    if (!claimed) return false
+    if (!claimed) {
+      this.trackIdle()
+      return false
+    }
+    this.idleSince = null
+    this.idleNotified = false
     const { job, template } = claimed
     this.currentJobId = job.id
-    this.emit({ type: 'job-updated', jobId: job.id, batchId: job.batchId, status: 'running' })
+    this.emit({
+      type: 'job-updated',
+      jobId: job.id,
+      batchId: job.batchId,
+      status: 'running',
+      hostId: this.hostId,
+    })
     try {
       const outputs = await this.execute(job, template)
       repo.finishJob(this.db, job.id, outputs)
+      this.failureStreak = 0
       const finalStatus = repo.getJob(this.db, job.id)?.status ?? 'succeeded'
-      this.emit({ type: 'job-updated', jobId: job.id, batchId: job.batchId, status: finalStatus })
+      this.emit({
+        type: 'job-updated',
+        jobId: job.id,
+        batchId: job.batchId,
+        status: finalStatus,
+        hostId: this.hostId,
+      })
     } catch (err) {
       if (err instanceof AbandonError) {
+        // 主动放弃/主机不可达:不是主机「坏」,不计入熔断
         repo.resetJobToPending(this.db, job.id)
         this.emit({ type: 'job-updated', jobId: job.id, batchId: job.batchId, status: 'pending' })
       } else {
         repo.failJob(this.db, job.id, err instanceof Error ? err.message : String(err))
         const finalStatus = repo.getJob(this.db, job.id)?.status ?? 'failed'
-        this.emit({ type: 'job-updated', jobId: job.id, batchId: job.batchId, status: finalStatus })
+        this.emit({
+          type: 'job-updated',
+          jobId: job.id,
+          batchId: job.batchId,
+          status: finalStatus,
+          hostId: this.hostId,
+        })
+        this.failureStreak++
+        if (this.failureStreak >= FAILURE_STREAK_LIMIT) {
+          this.failureStreak = 0
+          this.onFailureStreak?.(this.hostId)
+        }
       }
     } finally {
       this.currentJobId = null
@@ -150,6 +219,21 @@ export class Executor {
     const batchStatus = repo.getBatchStatus(this.db, job.batchId) ?? 'running'
     this.emit({ type: 'batch-updated', batchId: job.batchId, status: batchStatus })
     return true
+  }
+
+  /** 租用主机空转计时:达阈值上报一次,直到下次真正干活才会再次计时 */
+  private trackIdle(): void {
+    if (this.hostKind !== 'rental' || !this.onIdle) return
+    const t = this.now()
+    if (this.idleSince === null) {
+      this.idleSince = t
+      return
+    }
+    const idleMs = t - this.idleSince
+    if (!this.idleNotified && idleMs >= this.idleNotifyMs) {
+      this.idleNotified = true
+      this.onIdle(this.hostId, idleMs)
+    }
   }
 
   private async execute(job: Job, template: Template): Promise<OutputFile[]> {
@@ -181,6 +265,7 @@ export class Executor {
     let backoff = this.pollMs
     let lostCount = 0
     let errorCount = 0
+    let unreachableSince: number | null = null
     for (;;) {
       if (this.abandonRequested) throw new AbandonError('主机切换,放弃当前任务')
       let entry: ComfyHistoryEntry | null
@@ -196,11 +281,18 @@ export class Executor {
       } catch {
         // ComfyUI 掉线 / 查询失败：等待重连，batch 保持 running 不失败
         errorCount++
-        // 例外:已被 stop()(热切换等待模式在等收尾)且主机连续多轮不可达 —— 说明这台
-        // 主机已经死了,再等下去 pause() 永远不返回、切换界面一直转圈。按放弃处理:
-        // job 重置回 pending,由新主机重跑。循环还在跑(running)时不受影响,仍旧无限等。
-        if (!this.running && errorCount >= UNREACHABLE_ABANDON_POLLS) {
+        if (unreachableSince === null) unreachableSince = this.now()
+        // 例外 1:已被 stop()(热切换等待模式在等收尾)且主机连续多轮不可达 —— 说明这台
+        // 主机已经死了,再等下去 pause() 永远不返回、切换界面一直转圈。started 用来排除
+        // "从未 start() 过、直接调用 runPendingOnce()"(单测/单次调用)这种同样 running=false
+        // 但根本不在热切换收尾中的场景,否则它会被这套"停机等待"逻辑提前误判放弃。
+        if (this.started && !this.running && errorCount >= UNREACHABLE_ABANDON_POLLS) {
           throw new AbandonError('主机连续不可达,放弃当前任务')
+        }
+        // 例外 2:运行中的 worker 连续不可达超过阈值 —— 并行下不能无限等,否则这台主机
+        // 手上的任务成了僵尸:别的主机照常干活,它永远 running,batch 永远完不成。
+        if (this.now() - unreachableSince >= this.unreachableAbandonMs) {
+          throw new AbandonError('主机不可达超时,任务回池由其他主机接手')
         }
         await sleep(backoff)
         backoff = Math.min(backoff * 2, 30_000)
@@ -208,6 +300,7 @@ export class Executor {
       }
       backoff = this.pollMs
       errorCount = 0
+      unreachableSince = null
       if (entry?.status?.completed) return entry
       if (entry?.status?.status_str === 'error') {
         throw new Error(
@@ -249,9 +342,10 @@ export class Executor {
     return outputs
   }
 
-  /** 启动时收割/重置 running 状态残留的 job。 */
+  /** 启动时收割/重置**本主机**残留的 running job。
+   * 并行下不能收割全表:那会把其他主机正在跑的任务判死。 */
   async recover(): Promise<void> {
-    for (const job of repo.listRunningJobs(this.db)) {
+    for (const job of repo.listRunningJobsByHost(this.db, this.hostId)) {
       let recovered = false
       if (job.comfyPromptId) {
         try {

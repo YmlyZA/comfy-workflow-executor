@@ -31,7 +31,16 @@ beforeEach(() => {
 })
 
 function makeExecutor() {
-  return new Executor({ db, comfy, events, dataDir, pollMs: 5, hostId: 1 })
+  return new Executor({
+    db,
+    comfy,
+    events,
+    dataDir,
+    pollMs: 5,
+    hostId: 1,
+    hostName: 'test',
+    hostKind: 'resident',
+  })
 }
 
 function seed(

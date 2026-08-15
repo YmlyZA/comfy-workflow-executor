@@ -28,8 +28,16 @@ if (existsSync('./public')) {
   app.get('/*', serveStatic({ path: './public/index.html' })) // SPA fallback
 }
 
-// hostId 暂时固定为当前 active host;Task 3 会改造成每主机一个 Executor 实例
-const executor = new Executor({ db, comfy, events, dataDir: config.dataDir, hostId: activeHost.id })
+// hostId 暂时固定为当前 active host;Task 4 会改造成每主机一个 Executor 实例(pool)
+const executor = new Executor({
+  db,
+  comfy,
+  events,
+  dataDir: config.dataDir,
+  hostId: activeHost.id,
+  hostName: activeHost.name,
+  hostKind: activeHost.kind,
+})
 deps.executor = executor
 executor.start()
 startHostMonitor(deps)
