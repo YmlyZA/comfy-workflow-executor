@@ -15,9 +15,15 @@ export interface HostMonitor {
  *
  * 快照是前端的初始态来源:comfy-status 只在翻转时广播,新连上的客户端没有
  * 全量事件可回放,靠 GET /api/hosts 读这份缓存对齐。
+ *
+ * db 用 getDb() 取而不是收一个 Db 值:数据导入会整库替换、关掉旧连接
+ * (`deps.db = reopened`)。如果这里在构造时把 db 存成普通字段,拿到的永远是
+ * 启动时那个后来被关掉的旧句柄——每轮 tick 都会在已关闭的连接上报错,快照永久
+ * 卡死。调用方应该传 `() => sharedDeps.db` 这种读同一个可变对象的闭包,而不是
+ * 解构出一份 db 的快照。
  */
 export function startHostMonitor(
-  deps: { db: Db; events: EventEmitter; comfyFactory: (url: string) => ComfyClient },
+  deps: { getDb: () => Db; events: EventEmitter; comfyFactory: (url: string) => ComfyClient },
   intervalMs = 5000,
 ): HostMonitor {
   const online = new Map<number, boolean>()
@@ -38,7 +44,7 @@ export function startHostMonitor(
     if (probing) return
     probing = true
     try {
-      const hosts = listHosts(deps.db)
+      const hosts = listHosts(deps.getDb())
       const live = new Set(hosts.map((h) => h.id))
       for (const id of [...online.keys()]) if (!live.has(id)) online.delete(id)
       await Promise.all(

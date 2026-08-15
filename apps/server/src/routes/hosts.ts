@@ -115,13 +115,20 @@ export function hostRoutes(deps: AppDeps) {
   app.delete('/:id', async (c) => {
     const id = idParam(c.req.param('id'))
     if (id === null) return c.json({ error: '无效的 host id' }, 400)
-    return await lock.run(async () => {
-      // 停 worker 再删,避免 worker 拿着已删除主机的 id 继续认领
-      await deps.executor?.stopWorker(id)
-      const result = repo.deleteHost(deps.db, id)
-      if (result === 'active') return c.json({ error: '参考主机不可删除' }, 409)
-      return c.json({ ok: true })
+    // db 变更(判活 + 删行)在锁内快速做完;真正可能耗时的 stopWorker 挪到锁外——
+    // 否则等一个在跑的 GPU 任务期间,其他主机路由和数据导入会被同一把锁一起卡住。
+    // 顺序也很关键:必须先确认删得掉,再去停 worker——反过来的话,参考主机因
+    // active 被 409 拒绝时,worker 已经被停了却没有任何路径把它救回来(见 review)
+    const result = await lock.run(async () => {
+      if (repo.getHost(deps.db, id)?.active === 1) return 'active' as const
+      return repo.deleteHost(deps.db, id)
     })
+    if (result === 'active') return c.json({ error: '参考主机不可删除' }, 409)
+    // 停 worker:db 行已经真的删掉了,即便这期间 worker 还多认领了一个 job,
+    // 也只是 batch 详情里主机名字段查不到,不影响正确性(stopWorker 一开始就把
+    // worker 从池的 map 摘掉,不会被并发的 syncFromDb 重建出第二个)
+    await deps.executor?.stopWorker(id)
+    return c.json({ ok: true })
   })
 
   app.post('/:id/activate', async (c) => {
@@ -144,13 +151,18 @@ export function hostRoutes(deps: AppDeps) {
     const id = idParam(c.req.param('id'))
     if (id === null) return c.json({ error: '无效的 host id' }, 400)
     const { mode } = disableSchema.parse(await c.req.json())
-    return await lock.run(async () => {
-      if (!repo.getHost(deps.db, id)) return c.json({ error: 'host 不存在' }, 404)
-      repo.setHostEnabled(deps.db, id, false)
-      // wait = 等当前任务跑完;interrupt = 放弃并重置回 pending 由其他主机接手
-      await deps.executor?.stopWorker(id, mode === 'interrupt' ? { abandon: true } : undefined)
-      return c.json({ host: repo.getHost(deps.db, id)! })
+    // db 变更(setHostEnabled)在锁内快速做完;stopWorker 挪到锁外——wait 模式下
+    // pause() 要等一整个 GPU 任务收尾,占着锁会把其他主机路由和数据导入一起卡住
+    // 同样长的时间。host 对象直接用 setHostEnabled 的返回值,不在 stopWorker 之后
+    // 重查 deps.db——并发的数据导入可能在这期间把 deps.db 整个换掉
+    const host = await lock.run(async () => {
+      if (!repo.getHost(deps.db, id)) return undefined
+      return repo.setHostEnabled(deps.db, id, false)
     })
+    if (!host) return c.json({ error: 'host 不存在' }, 404)
+    // wait = 等当前任务跑完;interrupt = 放弃并重置回 pending 由其他主机接手
+    await deps.executor?.stopWorker(id, mode === 'interrupt' ? { abandon: true } : undefined)
+    return c.json({ host })
   })
 
   app.get('/:id/stats', async (c) => {

@@ -62,6 +62,18 @@ describe('hosts CRUD', () => {
     expect((await req(app, 'DELETE', `/${b.id}`)).status).toBe(200)
   })
 
+  it('删参考主机 409 时不停它的 worker(先确认删得掉,再动 worker)', async () => {
+    const { app, db, pool } = setupApp()
+    const a = repo.ensureActiveHost(db, 'http://a:8188')
+    pool.syncFromDb()
+    expect(pool.hasWorker(a.id)).toBe(true)
+    const res = await req(app, 'DELETE', `/${a.id}`)
+    expect(res.status).toBe(409)
+    // 回归点:旧实现会先 stopWorker 再判断 active,409 之后 worker 永久消失、
+    // 没有任何路径把它救回来(见 review)
+    expect(pool.hasWorker(a.id)).toBe(true)
+  })
+
   it('非数字 :id 返回 400', async () => {
     const { app, db } = setupApp()
     repo.ensureActiveHost(db, 'http://a:8188')
@@ -116,6 +128,66 @@ describe('参与调度开关', () => {
     expect(after.enabled).toBe(1)
     expect(after.disabledReason).toBeNull()
     expect(pool.hasWorker(host.id)).toBe(true)
+  })
+
+  it('disable 的 stopWorker 等待不占着切换锁:并发的其他主机 PATCH 不会被卡住', async () => {
+    const { app, db, pool } = setupApp()
+    const a = repo.createHost(db, { name: 'A', url: 'http://a:8188' })
+    const b = repo.createHost(db, { name: 'B', url: 'http://b:8188' })
+    pool.syncFromDb()
+    let release!: () => void
+    const gate = new Promise<void>((r) => {
+      release = r
+    })
+    // 模拟 A 正跑着一个很久的 GPU 任务:stopWorker 卡在 gate 上不返回
+    const stopSpy = vi.spyOn(pool, 'stopWorker').mockImplementation(() => gate)
+
+    const pDis = app.request(`/api/hosts/${a.id}/disable`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({ mode: 'wait' }),
+    })
+    // disable 的 db 变更在锁内很快做完,不用等 stopWorker 就已经落地
+    await vi.waitFor(() => expect(repo.getHost(db, a.id)!.enabled).toBe(0))
+
+    // 若切换锁还被 disable 占着(stopWorker 没挪到锁外),这个请求要等到 release() 才有响应;
+    // 用 holdSwitchLock 已确认过锁的排队机制,这里改用真实并发请求 + 有限等待验证它没被卡住
+    const patchDone = await Promise.race([
+      Promise.resolve(req(app, 'PATCH', `/${b.id}`, { name: 'B2' })).then(() => 'resolved' as const),
+      new Promise((r) => setTimeout(r, 300)).then(() => 'timeout' as const),
+    ])
+    expect(patchDone).toBe('resolved')
+    expect(repo.getHost(db, b.id)?.name).toBe('B2')
+
+    release()
+    expect((await pDis).status).toBe(200)
+    expect(stopSpy).toHaveBeenCalledWith(a.id, undefined)
+  })
+
+  it('DELETE 的 stopWorker 等待不占着切换锁:并发的其他主机 PATCH 不会被卡住', async () => {
+    const { app, db, pool } = setupApp()
+    const a = repo.createHost(db, { name: 'A', url: 'http://a:8188' })
+    const b = repo.createHost(db, { name: 'B', url: 'http://b:8188' })
+    pool.syncFromDb()
+    let release!: () => void
+    const gate = new Promise<void>((r) => {
+      release = r
+    })
+    const stopSpy = vi.spyOn(pool, 'stopWorker').mockImplementation(() => gate)
+
+    const pDel = req(app, 'DELETE', `/${a.id}`)
+    // delete 的 db 变更(判活 + 删行)在锁内很快做完,不用等 stopWorker
+    await vi.waitFor(() => expect(repo.getHost(db, a.id)).toBeUndefined())
+
+    const patchDone = await Promise.race([
+      Promise.resolve(req(app, 'PATCH', `/${b.id}`, { name: 'B2' })).then(() => 'resolved' as const),
+      new Promise((r) => setTimeout(r, 300)).then(() => 'timeout' as const),
+    ])
+    expect(patchDone).toBe('resolved')
+
+    release()
+    expect((await pDel).status).toBe(200)
+    expect(stopSpy).toHaveBeenCalledWith(a.id)
   })
 })
 

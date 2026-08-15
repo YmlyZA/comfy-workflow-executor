@@ -132,6 +132,28 @@ describe('POST /api/import', () => {
     expect(row.name).toBe('OLD')
   })
 
+  it('导入没有 hosts 表的旧版备份后,ensureActiveHost 补种的默认主机会被 syncFromDb 起出 worker', async () => {
+    // 用真实 ExecutorPool(不 mock pauseAll/resumeAll),才能验证 resumeAll 内部
+    // 真的按新库 hosts 表(含 ensureActiveHost 刚种下的默认主机)重建出 worker——
+    // 上面那条按序调用的测试和其他既有导入测试全都 mock 掉了 resumeAll,盖不住这条路径
+    deps.executor = new ExecutorPool({
+      db: deps.db,
+      events: deps.events,
+      dataDir,
+      comfyFactory: () => new FakeComfy(),
+    })
+    // buildBackupZip 造的备份只含一条 template,不含 hosts 表数据——正是「旧版备份」
+    // 或者说 ensureActiveHost 存在的理由:import 完必须由它补种默认主机
+    const zip = await buildBackupZip('NO-HOSTS-TABLE')
+    const res = await app.request('/api/import', { method: 'POST', headers: HZ, body: new Uint8Array(zip) })
+    expect(res.status).toBe(200)
+    const active = repo.getActiveHost(deps.db)
+    expect(active).toBeDefined()
+    // 回归点:若 resumeAll 在 ensureActiveHost 播种之前跑,这里会是 false——
+    // resumeAll 那一刻 hosts 表还是空的,起不出任何 worker,种完也没人再补 sync
+    expect(deps.executor.hasWorker(active!.id)).toBe(true)
+  })
+
   it('导入时按序调用 executor pause→resume,resume 收到重开后的新 db', async () => {
     const calls: string[] = []
     let resumedDb: unknown = null

@@ -34,7 +34,8 @@ const pool = new ExecutorPool({ db, events, dataDir: config.dataDir, comfyFactor
 pool.reclaimOrphans()
 pool.syncFromDb()
 deps.executor = pool
-deps.hostMonitor = startHostMonitor({ db, events, comfyFactory: createComfyClient })
+// getDb 读同一个 deps 对象:数据导入换库时改的是 deps.db,不是这里的局部变量 db
+deps.hostMonitor = startHostMonitor({ getDb: () => deps.db, events, comfyFactory: createComfyClient })
 
 serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log(`comfy-workflow-executor listening on :${info.port} → ${activeHost.name} (${activeHost.url})`)
