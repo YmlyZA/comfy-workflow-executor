@@ -7,6 +7,7 @@ import {
   referenceHost,
   rentalCost,
   rentalMinutes,
+  toLocalDatetimeInput,
 } from './hosts'
 
 const host = (over: Partial<HostDto>): HostDto => ({
@@ -81,5 +82,19 @@ describe('租用时长与费用', () => {
   it('起租时间在未来时按 0 处理,不出负数', () => {
     expect(rentalMinutes('2026-08-15T01:00:00Z', t0)).toBe(0)
     expect(rentalCost('2026-08-15T01:00:00Z', 2, t0)).toBe(0)
+  })
+})
+
+describe('toLocalDatetimeInput', () => {
+  it('与 new Date(v).toISOString() 互为逆运算,与运行时区无关', () => {
+    // 分钟精度的 UTC 瞬间;datetime-local 只到分钟,往返后应精确复原,不受时区影响。
+    // 若改用 slice(0, 16) 之类的字符串裁剪实现,这个断言在非 UTC 时区下会失败。
+    const original = '2026-08-10T12:30:00.000Z'
+    const local = toLocalDatetimeInput(original)
+    expect(new Date(local).toISOString()).toBe(original)
+  })
+
+  it('非法输入返回空字符串', () => {
+    expect(toLocalDatetimeInput('not-a-date')).toBe('')
   })
 })

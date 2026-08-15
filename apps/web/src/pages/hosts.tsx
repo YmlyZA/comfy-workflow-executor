@@ -32,7 +32,7 @@ import {
   type HostWritable,
   errorMessage,
 } from '@/lib/api'
-import { formatDuration, rentalCost, rentalMinutes } from '@/lib/hosts'
+import { formatDuration, rentalCost, rentalMinutes, toLocalDatetimeInput } from '@/lib/hosts'
 import { cn } from '@/lib/utils'
 
 export default function HostsPage() {
@@ -342,7 +342,7 @@ function HostForm({
     setUrl(initial?.url ?? '')
     setNote(initial?.note ?? '')
     setKind(initial?.kind ?? 'resident')
-    setRentedAt(initial?.rentedAt?.slice(0, 16) ?? '')
+    setRentedAt(initial?.rentedAt ? toLocalDatetimeInput(initial.rentedAt) : '')
     setHourlyRate(initial?.hourlyRate != null ? String(initial.hourlyRate) : '')
     setSeeded(true)
   }

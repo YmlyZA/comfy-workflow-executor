@@ -41,3 +41,20 @@ export function rentalCost(
   if (hourlyRate == null) return null
   return (rentalMinutes(rentedAt, nowMs) / 60) * hourlyRate
 }
+
+/**
+ * UTC ISO 时间转 <input type="datetime-local"> 期望的本地墙钟字符串(YYYY-MM-DDTHH:mm)。
+ *
+ * <input type="datetime-local"> 的值没有时区信息,浏览器按*本地*墙钟时间解释它
+ * (`new Date('2026-08-10T12:30')` 也是按本地时间解析)。如果直接对 UTC ISO 字符串
+ * 做 slice(0, 16),相当于把 UTC 的数字位原样当成本地时间塞进输入框——预填与回填
+ * (`new Date(v).toISOString()`)两个方向就不再互为逆运算,每编辑一次就偏移一次时区差。
+ * 这里改用本地 getter(getFullYear/getHours 等)取出「浏览器时区下的墙钟」,使预填与
+ * 回填成为一对精确的逆运算。
+ */
+export function toLocalDatetimeInput(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
