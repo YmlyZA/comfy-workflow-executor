@@ -38,5 +38,7 @@ deps.executor = pool
 deps.hostMonitor = startHostMonitor({ getDb: () => deps.db, events, comfyFactory: createComfyClient })
 
 serve({ fetch: app.fetch, port: config.port }, (info) => {
-  console.log(`comfy-workflow-executor listening on :${info.port} → ${activeHost.name} (${activeHost.url})`)
+  console.log(
+    `comfy-workflow-executor listening on :${info.port} → 参考主机 ${activeHost.name}，${pool.size()} 台主机参与调度`,
+  )
 })
