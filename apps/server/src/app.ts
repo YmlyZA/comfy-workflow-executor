@@ -5,6 +5,7 @@ import { auth } from './auth.js'
 import type { Config } from './config.js'
 import type { Db } from './db/index.js'
 import { createComfyClient, type ComfyClient } from './comfy/client.js'
+import type { ExecutorPool } from './executor-pool.js'
 import { ObjectInfoCache } from './comfy/object-info-cache.js'
 import { getActiveHost } from './db/repo.js'
 import type { AsyncLock } from './host-switch.js'
@@ -25,8 +26,8 @@ export interface AppDeps {
   db: Db
   comfy: ComfyClient | null
   events: EventEmitter
-  /** 数据导入热切换用;测试/无 GPU 场景可为 null */
-  executor?: { pause(opts?: { abandon?: boolean }): Promise<void>; resume(db: Db, comfy?: ComfyClient): void } | null
+  /** 执行器池;测试/无 GPU 场景可为 null */
+  executor?: ExecutorPool | null
   /** /object_info 缓存;由 createApp 自动初始化 */
   objectInfo?: ObjectInfoCache
   /** 热切换串行锁(主机切换 / 改 active URL / 数据导入共用);由各路由首次使用时自动初始化 */

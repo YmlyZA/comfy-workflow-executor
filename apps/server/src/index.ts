@@ -9,6 +9,7 @@ import { loadConfig } from './config.js'
 import { createDb } from './db/index.js'
 import { ensureActiveHost } from './db/repo.js'
 import { Executor } from './executor.js'
+import type { ExecutorPool } from './executor-pool.js'
 import { startHostMonitor } from './host-monitor.js'
 
 const config = loadConfig()
@@ -20,7 +21,9 @@ const activeHost = ensureActiveHost(db, config.comfyUrl)
 const events = new EventEmitter()
 const comfy = createComfyClient(activeHost.url)
 // deps 对象与 app/executor/monitor 共享:热切换靠替换 deps.db / deps.comfy
-const deps = { config, db, comfy, events, executor: null as Executor | null }
+// TODO(Task 8): 这里仍是改造前的单 Executor,先用类型断言让 AppDeps.executor(已提前
+// 改为 ExecutorPool 类型,供 Task 6 路由使用)编译通过;真正换成 ExecutorPool 由 Task 8 接线。
+const deps = { config, db, comfy, events, executor: null as ExecutorPool | null }
 const app = createApp(deps)
 
 if (existsSync('./public')) {
@@ -38,7 +41,7 @@ const executor = new Executor({
   hostName: activeHost.name,
   hostKind: activeHost.kind,
 })
-deps.executor = executor
+deps.executor = executor as unknown as ExecutorPool
 executor.start()
 startHostMonitor(deps)
 
