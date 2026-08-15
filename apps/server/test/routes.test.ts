@@ -564,6 +564,67 @@ describe('DELETE /api/batches/:id purgeGpu', () => {
     expect(body.gpuPurgeFailed).toBe(true)
     expect(comfy.cweDeleted).toHaveLength(0) // 不会错发到当前主机
   })
+
+  /** 取消批次:并行下 deps.comfy(参考主机)几乎肯定在跑**别的**批次,
+   * 朝它发 interrupt 等于误杀无辜任务,还会把健康的参考主机推向熔断 */
+  function makeTwoHostApp() {
+    const comfy = new FakeComfy() // 参考主机 h1 的 client
+    const remote = new FakeComfy() // h2 的临时 client
+    const localDb = createDb(':memory:')
+    const localApp = createApp({
+      config: loadConfig({ AUTH_TOKEN: 'secret' }),
+      db: localDb,
+      comfy,
+      events: new EventEmitter(),
+      comfyFactory: () => remote,
+    })
+    const h1 = repo.ensureActiveHost(localDb, 'http://h1:8188')
+    const h2 = repo.createHost(localDb, { name: 'H2', url: 'http://h2:8188' })
+    const t = repo.createTemplate(localDb, {
+      name: 'T',
+      comfyJson: templateBody.comfyJson,
+      params: templateBody.params as any,
+    })
+    return { comfy, remote, localDb, localApp, h1, h2, t }
+  }
+
+  it('取消批次只中断执行该任务的主机,参考主机手上的任务不受影响', async () => {
+    const { comfy, remote, localDb, localApp, h1, h2, t } = makeTwoHostApp()
+    const b1 = repo.createBatch(localDb, t.id, { name: 'B1', jobs: [{ prompt: 'a' }] })
+    const b2 = repo.createBatch(localDb, t.id, { name: 'B2', jobs: [{ prompt: 'b' }] })
+    const onH1 = repo.claimNextJob(localDb, h1.id)! // 参考主机在跑 b1
+    const onH2 = repo.claimNextJob(localDb, h2.id)! // h2 在跑 b2
+    const res = await localApp.request(`/api/batches/${b2.id}/cancel`, { method: 'POST', headers: H })
+    expect(res.status).toBe(200)
+    expect(remote.interrupts).toBe(1)
+    expect(comfy.interrupts).toBe(0) // 回归点:旧实现无条件打断参考主机
+    expect(repo.getJob(localDb, onH1.job.id)!.status).toBe('running')
+    expect(repo.getJob(localDb, onH2.job.id)!.status).toBe('canceled')
+    void b1
+  })
+
+  it('同批任务分布在多台主机时逐台中断', async () => {
+    const { comfy, remote, localDb, localApp, h1, h2, t } = makeTwoHostApp()
+    const b = repo.createBatch(localDb, t.id, { name: 'B', jobs: [{ prompt: 'a' }, { prompt: 'b' }] })
+    repo.claimNextJob(localDb, h1.id)
+    repo.claimNextJob(localDb, h2.id)
+    const res = await localApp.request(`/api/batches/${b.id}/cancel`, { method: 'POST', headers: H })
+    expect(res.status).toBe(200)
+    expect(comfy.interrupts).toBe(1) // 参考主机这次确实有份
+    expect(remote.interrupts).toBe(1)
+  })
+
+  it('执行主机的行已被删除时照常取消,不报错', async () => {
+    const { comfy, remote, localDb, localApp, h2, t } = makeTwoHostApp()
+    const b = repo.createBatch(localDb, t.id, { name: 'B', jobs: [{ prompt: 'a' }] })
+    repo.claimNextJob(localDb, h2.id)
+    expect(repo.deleteHost(localDb, h2.id)).toBe('ok')
+    const res = await localApp.request(`/api/batches/${b.id}/cancel`, { method: 'POST', headers: H })
+    expect(res.status).toBe(200)
+    expect(remote.interrupts).toBe(0)
+    expect(comfy.interrupts).toBe(0) // 主机没了也不迁怒参考主机
+    expect(repo.getBatchStatus(localDb, b.id)).toBe('canceled')
+  })
 })
 
 describe('建批自动锁定主机', () => {

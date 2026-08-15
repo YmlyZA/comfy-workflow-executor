@@ -3,7 +3,29 @@ import { rm } from 'node:fs/promises'
 import { Hono } from 'hono'
 import * as repo from '../db/repo.js'
 import type { AppDeps } from '../app.js'
+import type { ComfyClient } from '../comfy/client.js'
+import type { Job } from '../db/schema.js'
 import { createAsyncLock } from '../host-switch.js'
+
+/** 这批 job 各自所在主机的 client(按主机去重)。
+ * 参考主机复用 deps.comfy,其余按 hosts 表 URL 临建(与 thumbs/maintenance 同一套写法);
+ * hostId 为空的历史任务(盖章之前)归参考主机;主机行已被删则无从中断,跳过。 */
+function interruptClients(deps: AppDeps, jobs: Job[]): ComfyClient[] {
+  const active = repo.getActiveHost(deps.db)
+  const clients: ComfyClient[] = []
+  // 无章任务与参考主机归一成同一个 key,避免朝参考主机连发两次 interrupt
+  const keys = new Set(jobs.map((j) => j.hostId ?? active?.id ?? null))
+  for (const hostId of keys) {
+    if (hostId === null || hostId === active?.id) {
+      if (deps.comfy) clients.push(deps.comfy)
+      continue
+    }
+    const host = repo.getHost(deps.db, hostId)
+    const client = host ? deps.comfyFactory?.(host.url) : null
+    if (client) clients.push(client)
+  }
+  return clients
+}
 
 export function batchRoutes(deps: AppDeps) {
   const app = new Hono()
@@ -95,8 +117,12 @@ export function batchRoutes(deps: AppDeps) {
     if (!['pending', 'running'].includes(detail.batch.status)) {
       return c.json({ error: 'batch 已结束,无法取消' }, 409)
     }
-    const runningJob = repo.cancelBatch(deps.db, id)
-    if (runningJob && deps.comfy) await deps.comfy.interrupt().catch(() => {})
+    // interrupt 必须发给**真正在跑这个任务的那台主机**:deps.comfy 是参考主机的
+    // client,而参考主机大概率正在跑别的批次——朝它发 interrupt 等于误杀无辜任务
+    // (还会推高那台主机的失败连击直至熔断),而该停的主机照样把已取消的任务出完图。
+    for (const client of interruptClients(deps, repo.cancelBatch(deps.db, id))) {
+      await client.interrupt().catch(() => {})
+    }
     deps.events.emit('event', { type: 'batch-updated', batchId: id, status: 'canceled' })
     return c.json({ ok: true })
   })

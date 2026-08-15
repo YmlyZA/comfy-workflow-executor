@@ -102,13 +102,20 @@ describe('batch lifecycle', () => {
     expect(repo.getBatchDetail(db, b.id)?.batch.status).toBe('completed')
   })
 
-  it('cancelBatch cancels pending+running jobs and returns running one', () => {
+  it('cancelBatch cancels pending+running jobs and returns running ones', () => {
     const { b } = seedBatch()
     const { job } = repo.claimNextJob(db, 1)!
     const running = repo.cancelBatch(db, b.id)
-    expect(running?.id).toBe(job.id)
+    expect(running.map((j) => j.id)).toEqual([job.id])
     const statuses = repo.getBatchDetail(db, b.id)!.jobs.map((j) => j.status)
     expect(statuses).toEqual(['canceled', 'canceled'])
+  })
+
+  it('cancelBatch 返回同批跨主机的**全部** running job(每台都要收到 interrupt)', () => {
+    const { b } = seedBatch()
+    repo.claimNextJob(db, 1)
+    repo.claimNextJob(db, 2)
+    expect(repo.cancelBatch(db, b.id).map((j) => j.hostId)).toEqual([1, 2])
   })
 
   it('retryFailedJobs resets failed to pending and reopens batch', () => {

@@ -348,13 +348,17 @@ export function markBatchCompletedIfDone(db: Db, batchId: number): boolean {
   })
 }
 
-export function cancelBatch(db: Db, id: number): Job | undefined {
+/** 取消整批,返回被取消掉的**全部** running job。
+ * 并行调度下同一批的任务可能同时跑在多台主机上,只返回一个的话另外几台收不到
+ * interrupt,会继续把已取消的任务出完图(finishJob 再被 status='running' 守卫挡掉,
+ * 产物白下载),所以这里返回数组由调用方逐台中断。 */
+export function cancelBatch(db: Db, id: number): Job[] {
   return db.transaction((tx) => {
     const running = tx
       .select()
       .from(jobs)
       .where(and(eq(jobs.batchId, id), eq(jobs.status, 'running')))
-      .get()
+      .all()
     tx.update(jobs)
       .set({ status: 'canceled', finishedAt: now() })
       .where(and(eq(jobs.batchId, id), inArray(jobs.status, ['pending', 'running'])))
