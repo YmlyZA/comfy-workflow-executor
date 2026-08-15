@@ -3,6 +3,7 @@ import { existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { serve } from '@hono/node-server'
 import { serveStatic } from '@hono/node-server/serve-static'
+import type { AppDeps } from './app.js'
 import { createApp } from './app.js'
 import { createComfyClient } from './comfy/client.js'
 import { loadConfig } from './config.js'
@@ -20,7 +21,7 @@ const activeHost = ensureActiveHost(db, config.comfyUrl)
 const events = new EventEmitter()
 const comfy = createComfyClient(activeHost.url)
 // deps 对象与 app/executor/monitor 共享:热切换靠替换 deps.db / deps.comfy
-const deps = { config, db, comfy, events, executor: null as ExecutorPool | null }
+const deps: AppDeps = { config, db, comfy, events, executor: null }
 const app = createApp(deps)
 
 if (existsSync('./public')) {
@@ -33,7 +34,7 @@ const pool = new ExecutorPool({ db, events, dataDir: config.dataDir, comfyFactor
 pool.reclaimOrphans()
 pool.syncFromDb()
 deps.executor = pool
-startHostMonitor(deps)
+deps.hostMonitor = startHostMonitor({ db, events, comfyFactory: createComfyClient })
 
 serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log(`comfy-workflow-executor listening on :${info.port} → ${activeHost.name} (${activeHost.url})`)

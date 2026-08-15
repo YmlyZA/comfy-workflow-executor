@@ -9,6 +9,7 @@ import type { ExecutorPool } from './executor-pool.js'
 import { ObjectInfoCache } from './comfy/object-info-cache.js'
 import { getActiveHost } from './db/repo.js'
 import type { AsyncLock } from './host-switch.js'
+import type { HostMonitor } from './host-monitor.js'
 import { templateRoutes } from './routes/templates.js'
 import { batchRoutes } from './routes/batches.js'
 import { eventRoutes } from './routes/events.js'
@@ -34,6 +35,8 @@ export interface AppDeps {
   switchLock?: AsyncLock
   /** 按 URL 建 client(非当前主机的 GPU 清理用);默认真实实现,测试可注入 fake */
   comfyFactory?: (url: string) => ComfyClient
+  /** 主机在线状态缓存;由 index.ts 在 createApp 之后赋值(deps 是共享可变对象) */
+  hostMonitor?: HostMonitor
 }
 
 export function createApp(deps: AppDeps) {
