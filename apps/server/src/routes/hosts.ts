@@ -18,7 +18,9 @@ const createSchema = z.object({
   note: z.string().nullish(),
   kind: kindSchema.optional(),
   rentedAt: z.string().nullish(),
-  hourlyRate: z.number().positive().nullish(),
+  // 允许 0:自有/包月机器时长仍要记,单价填 0 是合法输入。positive() 会把它 400 掉,
+  // 前端还会把 zod 的 issue 数组原样 toast 出来
+  hourlyRate: z.number().nonnegative().nullish(),
 })
 const patchSchema = z.object({
   name: z.string().trim().min(1).optional(),
@@ -26,7 +28,9 @@ const patchSchema = z.object({
   note: z.string().nullish(),
   kind: kindSchema.optional(),
   rentedAt: z.string().nullish(),
-  hourlyRate: z.number().positive().nullish(),
+  // 允许 0:自有/包月机器时长仍要记,单价填 0 是合法输入。positive() 会把它 400 掉,
+  // 前端还会把 zod 的 issue 数组原样 toast 出来
+  hourlyRate: z.number().nonnegative().nullish(),
   /** 只接受 true:停用需要选模式,必须走 POST /:id/disable */
   enabled: z.literal(true).optional(),
 })
@@ -91,25 +95,30 @@ export function hostRoutes(deps: AppDeps) {
     const id = idParam(c.req.param('id'))
     if (id === null) return c.json({ error: '无效的 host id' }, 400)
     const patch = patchSchema.parse(await c.req.json())
-    return await lock.run(async () => {
+    // 与 DELETE / disable 同一套结构:db 变更(改行 + 换查询 client)在锁内快速做完,
+    // 可能长达一整个 GPU 任务的 restartWorker 挪到锁外——否则改个 URL 拼写错误就会
+    // 把切换锁占上好几分钟,数据导入和其余主机路由跟着一起卡死(代理层还会 504)
+    const done = await lock.run(async () => {
       const before = repo.getHost(deps.db, id)
-      if (!before) return c.json({ error: 'host 不存在' }, 404)
+      if (!before) return null
       const { enabled, ...fields } = patch
       const urlChanged = fields.url !== undefined && fields.url !== before.url
       // fields 可能为空({ enabled: true } 单独出现时);drizzle 的 .set({}) 会抛「No values to set」
       if (Object.keys(fields).length > 0 && !repo.updateHost(deps.db, id, fields)) {
-        return c.json({ error: 'host 不存在' }, 404)
+        return null
       }
       if (enabled === true && before.enabled !== 1) repo.setHostEnabled(deps.db, id, true)
-      // 改 URL 只重建该主机的 worker,不影响其他 worker
-      if (urlChanged) await deps.executor?.restartWorker(id)
-      deps.executor?.syncFromDb()
-      // 参考主机换了地址,查询用 client 也要跟着换
-      if (urlChanged && before.active === 1) {
-        await reconnectComfy(deps, repo.getHost(deps.db, id)!)
-      }
-      return c.json({ host: repo.getHost(deps.db, id)! })
+      const host = repo.getHost(deps.db, id)!
+      // 参考主机换了地址,查询用 client 也要跟着换(一次建连,不等 GPU 任务)
+      if (urlChanged && before.active === 1) await reconnectComfy(deps, host)
+      return { urlChanged, host }
     })
+    if (!done) return c.json({ error: 'host 不存在' }, 404)
+    // 改 URL 只重建该主机的 worker,不影响其他 worker
+    if (done.urlChanged) await deps.executor?.restartWorker(id)
+    deps.executor?.syncFromDb()
+    // host 用锁内取到的那份:并发的数据导入可能已经把 deps.db 整个换掉
+    return c.json({ host: done.host })
   })
 
   app.delete('/:id', async (c) => {

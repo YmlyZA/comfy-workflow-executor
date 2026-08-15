@@ -89,6 +89,32 @@ describe('熔断计数', () => {
   })
 })
 
+describe('停机指令落在 isUp() 的往返里', () => {
+  it('isUp 返回前被 stop():本轮不再认领任务', async () => {
+    const { db, tpl, comfy, ex } = setup()
+    const batch = repo.createBatch(db, tpl.id, { name: 'x', jobs: [{ p: 1 }] })
+    let release!: () => void
+    const gate = new Promise<void>((r) => {
+      release = r
+    })
+    let calls = 0
+    comfy.isUp = async () => {
+      calls++
+      await gate
+      return true
+    }
+    ex.start()
+    await vi.waitFor(() => expect(calls).toBe(1))
+    // 熔断后 pool 推到下一轮的 stopWorker(或用户点停用)正落在这段 await 里
+    ex.stop()
+    release()
+    await ex.pause()
+    // 回归点:不复查 running 的话这里会多跑一个任务——熔断实际成了「第 4 次失败才停手」,
+    // host-disabled 的提示也要晚整整一个任务才弹出来
+    expect(repo.getBatchDetail(db, batch.id)!.jobs[0]!.status).toBe('pending')
+  })
+})
+
 describe('recover 按主机隔离', () => {
   it('只收割自己主机的 running job', async () => {
     const { db, tpl, host, ex } = setup()

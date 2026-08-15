@@ -147,7 +147,12 @@ export class Executor {
     await this.recover().catch((err) => console.error('recover failed', err))
     let offlineBackoff = this.pollMs
     while (this.running) {
-      if (!(await this.comfy.isUp())) {
+      const up = await this.comfy.isUp()
+      // isUp() 是一次网络往返,停机指令(熔断后 pool 推到下一轮的 stopWorker、
+      // 用户点停用)很容易落在这段 await 里。不复查就会再认领一个 job:熔断实际
+      // 变成第 4 次失败才停手,host-disabled 的提示也要晚整整一个任务才弹出来
+      if (!this.running) break
+      if (!up) {
         await sleep(offlineBackoff)
         offlineBackoff = Math.min(offlineBackoff * 2, 30_000)
         continue

@@ -54,6 +54,18 @@ describe('hosts CRUD', () => {
     expect((await req(app, 'POST', '', { name: 'B', url: 'a:8188' })).status).toBe(400)
   })
 
+  it('单价 0 是合法输入(自有机器记时长不记钱),不该被 400 掉', async () => {
+    const { app } = setupApp()
+    const res = await req(app, 'POST', '', {
+      name: 'A',
+      url: 'http://a:8188',
+      kind: 'rental',
+      hourlyRate: 0,
+    })
+    expect(res.status).toBe(201)
+    expect(((await res.json()) as any).host.hourlyRate).toBe(0)
+  })
+
   it('删 active 409;删普通 ok', async () => {
     const { app, db } = setupApp()
     const a = repo.ensureActiveHost(db, 'http://a:8188')
@@ -353,6 +365,35 @@ describe('PATCH', () => {
     expect(repo.getHost(db, a.id)?.url).toBe('http://a2:8188')
     expect(seen).toHaveLength(1)
     expect(seen[0]).toMatchObject({ hostId: a.id })
+  })
+
+  it('改 URL 的 worker 重建不占着切换锁:并发的其他主机 PATCH 不会被卡住', async () => {
+    const { app, db, pool } = setupApp()
+    const a = repo.createHost(db, { name: 'A', url: 'http://a:8188' })
+    const b = repo.createHost(db, { name: 'B', url: 'http://b:8188' })
+    pool.syncFromDb()
+    let release!: () => void
+    const gate = new Promise<void>((r) => {
+      release = r
+    })
+    // 模拟 A 正跑着一个很久的 GPU 任务:restartWorker 里的 pause() 卡住不返回
+    const restartSpy = vi.spyOn(pool, 'restartWorker').mockImplementation(() => gate)
+
+    const pPatch = req(app, 'PATCH', `/${a.id}`, { url: 'http://a2:8188' })
+    // 改行在锁内很快做完,不用等 worker 重建
+    await vi.waitFor(() => expect(repo.getHost(db, a.id)!.url).toBe('http://a2:8188'))
+
+    // 回归点:旧实现整段在锁内,这个请求要等到 release() 才有响应(代理层直接 504)
+    const patchDone = await Promise.race([
+      Promise.resolve(req(app, 'PATCH', `/${b.id}`, { name: 'B2' })).then(() => 'resolved' as const),
+      new Promise((r) => setTimeout(r, 300)).then(() => 'timeout' as const),
+    ])
+    expect(patchDone).toBe('resolved')
+    expect(repo.getHost(db, b.id)?.name).toBe('B2')
+
+    release()
+    expect((await pPatch).status).toBe(200)
+    expect(restartSpy).toHaveBeenCalledWith(a.id)
   })
 
   it('改非参考主机 URL:只重建该主机 worker,不触发重连事件', async () => {
