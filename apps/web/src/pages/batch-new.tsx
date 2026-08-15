@@ -30,6 +30,7 @@ import { ImageValueControl } from '@/components/image-value-control'
 import { TextValueControl } from '@/components/text-value-control'
 import { MatrixEntry } from '@/components/matrix-entry'
 import { api } from '@/lib/api'
+import { pinnedHostNotice } from '@/lib/hosts'
 import {
   appendRow,
   createRowIdGen,
@@ -39,6 +40,7 @@ import {
   toRows,
   type EntryRow,
 } from '@/lib/rows'
+import { useHosts } from '@/hooks/use-comfy-status'
 import { useImageDims } from '@/hooks/use-image-dims'
 import { useDebouncedValue } from '@/hooks/use-debounced-value'
 import type { TemplateDto } from '@/pages/templates'
@@ -82,6 +84,8 @@ export default function BatchNewPage() {
   }, [from, fromBatch.data, fromBatch.isError])
 
   const qc = useQueryClient()
+  // 建批后判断锁定主机能不能干活,用来决定提示口径
+  const hosts = useHosts()
   const submit = useMutation({
     mutationFn: () =>
       api<{ id: number; pinnedHostId: number | null }>(`/templates/${templateId}/batches`, {
@@ -92,9 +96,12 @@ export default function BatchNewPage() {
       // 建批会在服务端写入输入历史,失效所有 key 的历史缓存
       void qc.invalidateQueries({ queryKey: ['input-history'] })
       // 前端无法可靠判断 image 参数引用的是本地上传还是 GPU 侧文件,
-      // 服务端建批时才能确定;这里按返回的 pinnedHostId 事后提示
+      // 服务端建批时才能确定;这里按返回的 pinnedHostId 事后提示。
+      // 锁定的那台主机可能已被熔断停用或离线——那就不能再说「将只在该主机执行」
       if (b.pinnedHostId != null) {
-        toast.info('本批次引用了 GPU 主机上的文件，将只在该主机执行')
+        const notice = pinnedHostNotice(hosts, b.pinnedHostId)
+        if (notice.level === 'warning') toast.warning(notice.message)
+        else toast.info(notice.message)
       }
       navigate(`/batches/${b.id}`)
     },

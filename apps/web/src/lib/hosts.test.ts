@@ -4,6 +4,7 @@ import {
   formatDuration,
   hasUsableHost,
   onlineSummary,
+  pinnedHostNotice,
   referenceHost,
   rentalCost,
   rentalMinutes,
@@ -58,6 +59,32 @@ describe('referenceHost', () => {
   })
   it('没有 active 时返回 undefined', () => {
     expect(referenceHost([host({})])).toBeUndefined()
+  })
+})
+
+describe('pinnedHostNotice', () => {
+  it('锁定主机可用时才说「将只在该主机执行」', () => {
+    const n = pinnedHostNotice([host({ id: 7, name: 'A', enabled: 1, online: true })], 7)
+    expect(n.level).toBe('info')
+    expect(n.message).toContain('将只在该主机执行')
+    expect(n.message).toContain('A')
+  })
+
+  it('锁定主机未参与调度(比如刚被熔断)时给告警,且不承诺会执行', () => {
+    const n = pinnedHostNotice([host({ id: 7, name: 'A', enabled: 0, online: true })], 7)
+    expect(n.level).toBe('warning')
+    expect(n.message).toContain('未参与调度')
+    expect(n.message).not.toContain('将只在该主机执行')
+  })
+
+  it('锁定主机离线/未探测到在线时给告警', () => {
+    expect(pinnedHostNotice([host({ id: 7, online: false })], 7).level).toBe('warning')
+    expect(pinnedHostNotice([host({ id: 7, online: null })], 7).level).toBe('warning')
+  })
+
+  it('锁定主机已不存在时给告警;主机列表没加载时只陈述事实', () => {
+    expect(pinnedHostNotice([], 7).message).toContain('已不存在')
+    expect(pinnedHostNotice(undefined, 7).level).toBe('info')
   })
 })
 

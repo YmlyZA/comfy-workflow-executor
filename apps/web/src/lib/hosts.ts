@@ -19,6 +19,32 @@ export function referenceHost(hosts: HostDto[]): HostDto | undefined {
   return hosts.find((h) => h.active === 1)
 }
 
+/**
+ * 建批后对「批次被锁定到某台主机」的提示。
+ *
+ * 锁定主机只能是参考主机(被引用的 GPU 侧文件只存在于那台机器上),但参考主机
+ * 未必在参与调度——它可能刚被熔断自动停用,或者干脆离线。这种时候不能再说
+ * 「将只在该主机执行」:批次其实一个任务都跑不起来,得如实告诉用户为什么。
+ */
+export function pinnedHostNotice(
+  hosts: HostDto[] | undefined,
+  pinnedHostId: number,
+): { level: 'info' | 'warning'; message: string } {
+  // 主机列表还没加载出来:只说事实,不做「跑得起来」的承诺
+  if (!hosts) return { level: 'info', message: '本批次引用了 GPU 主机上的文件，将只在该主机执行' }
+  const pinned = hosts.find((h) => h.id === pinnedHostId)
+  const prefix = `本批次引用了 GPU 主机上的文件，已锁定到主机「${pinned?.name ?? `#${pinnedHostId}`}」`
+  if (!pinned) return { level: 'warning', message: `${prefix}，但该主机已不存在，任务无人执行` }
+  if (pinned.enabled !== 1) {
+    return { level: 'warning', message: `${prefix}，但该主机未参与调度，任务要等它恢复调度后才会执行` }
+  }
+  if (pinned.online !== true) {
+    const why = pinned.online === false ? '当前离线' : '尚未探测到在线'
+    return { level: 'warning', message: `${prefix}，但该主机${why}，任务要等它恢复后才会执行` }
+  }
+  return { level: 'info', message: `${prefix}，将只在该主机执行` }
+}
+
 /** 已运行分钟数;起租时间在未来时按 0 处理 */
 export function rentalMinutes(rentedAt: string, nowMs: number): number {
   const start = Date.parse(rentedAt)

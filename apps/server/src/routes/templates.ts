@@ -64,6 +64,11 @@ export function templateRoutes(deps: AppDeps) {
           return !existsSync(join(deps.config.dataDir, 'uploads', v))
         }),
       )
+    // 锁定目标只能是参考主机(GPU 侧文件列表就是从它那儿列出来的,文件也只在它上面),
+    // 即使它此刻没在参与调度也照锁不误:换锁别的主机等于锁到一台没有这些文件的机器上,
+    // 每个任务都会失败。参考主机被熔断停用时,这批任务是「等它恢复」而不是「跑不了」,
+    // 但绝不能让前端继续说「将只在该主机执行」——建批响应带着 pinnedHostId,
+    // 前端用 pinnedHostNotice() 按该主机的实时状态给出如实提示(批次详情页也有横幅)
     const pinnedHostId = referencesGpuFile ? (repo.getActiveHost(deps.db)?.id ?? null) : null
     const batch = repo.createBatch(deps.db, id, input, pinnedHostId)
     // 输入历史记录失败不影响建批
