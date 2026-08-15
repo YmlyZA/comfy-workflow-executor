@@ -2,6 +2,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 import Papa from 'papaparse'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { toast } from 'sonner'
 import { computeLockedDim, fitSource, type ParamValues } from '@cwe/shared'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -83,13 +84,18 @@ export default function BatchNewPage() {
   const qc = useQueryClient()
   const submit = useMutation({
     mutationFn: () =>
-      api<{ id: number }>(`/templates/${templateId}/batches`, {
+      api<{ id: number; pinnedHostId: number | null }>(`/templates/${templateId}/batches`, {
         method: 'POST',
         body: JSON.stringify({ name: name || `batch-${Date.now()}`, jobs }),
       }),
     onSuccess: (b) => {
       // 建批会在服务端写入输入历史,失效所有 key 的历史缓存
       void qc.invalidateQueries({ queryKey: ['input-history'] })
+      // 前端无法可靠判断 image 参数引用的是本地上传还是 GPU 侧文件,
+      // 服务端建批时才能确定;这里按返回的 pinnedHostId 事后提示
+      if (b.pinnedHostId != null) {
+        toast.info('本批次引用了 GPU 主机上的文件，将只在该主机执行')
+      }
       navigate(`/batches/${b.id}`)
     },
     onError: (e) => setError(e.message),
