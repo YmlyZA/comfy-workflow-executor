@@ -98,6 +98,11 @@ export function backupRoutes(deps: AppDeps) {
             await mkdir(join(dataDir, 'outputs'), { recursive: true })
             const reopened = createDb(join(dataDir, 'db.sqlite'))
             deps.db = reopened
+            // reconnectComfy 已不碰 executor(Task 6 起收窄为只换查询 client);pauseAll 的另一半
+            // 必须在这里显式补上,否则整个池永久停在暂停态。swapContents 失败时也会走到这里
+            // (它已把 dataDir 回滚回旧库),reopened 此时装的是旧库,worker 照样按旧库 hosts 表重建,
+            // 不会因为回滚就漏掉恢复
+            deps.executor?.resumeAll(reopened)
             // 导入的库自带 hosts 表(或旧版库由 ensureActiveHost 补种),按其 active 主机
             // 重建连接并广播在线状态(与主机切换同一套流程)
             const activeHost = ensureActiveHost(reopened, deps.config.comfyUrl)
