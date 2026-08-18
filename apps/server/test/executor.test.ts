@@ -31,7 +31,16 @@ beforeEach(() => {
 })
 
 function makeExecutor() {
-  return new Executor({ db, comfy, events, dataDir, pollMs: 5 })
+  return new Executor({
+    db,
+    comfy,
+    events,
+    dataDir,
+    pollMs: 5,
+    hostId: 1,
+    hostName: 'test',
+    hostKind: 'resident',
+  })
 }
 
 function seed(
@@ -98,7 +107,7 @@ describe('executor', () => {
 
   it('recover(): finished-in-history running job is harvested', async () => {
     const b = seed()
-    const claimed = repo.claimNextJob(db)!
+    const claimed = repo.claimNextJob(db, 1)!
     repo.setJobPromptId(db, claimed.job.id, 'p-old')
     comfy.history.set('p-old', comfy.nextResult!)
     await makeExecutor().recover()
@@ -107,14 +116,14 @@ describe('executor', () => {
 
   it('recover(): unknown running job resets to pending', async () => {
     const b = seed()
-    repo.claimNextJob(db)
+    repo.claimNextJob(db, 1)
     await makeExecutor().recover()
     expect(repo.getBatchDetail(db, b.id)!.jobs[0]?.status).toBe('pending')
   })
 
   it('recover(): history 记录执行失败的 job 直接置 failed 不重跑', async () => {
     const b = seed()
-    const claimed = repo.claimNextJob(db)!
+    const claimed = repo.claimNextJob(db, 1)!
     repo.setJobPromptId(db, claimed.job.id, 'p-err')
     comfy.history.set('p-err', {
       status: { completed: false, status_str: 'error', messages: [['execution_error', {}]] },
@@ -128,7 +137,7 @@ describe('executor', () => {
 
   it('recover(): comfy down resets running jobs to pending', async () => {
     const b = seed()
-    const claimed = repo.claimNextJob(db)!
+    const claimed = repo.claimNextJob(db, 1)!
     repo.setJobPromptId(db, claimed.job.id, 'p-x')
     comfy.up = false
     comfy.getHistory = async () => {

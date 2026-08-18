@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import type { EnumRef, ParamDef, ParamType } from '@cwe/shared'
 import type { TemplateDto } from '@/pages/templates'
 import { Button } from '@/components/ui/button'
@@ -17,6 +17,8 @@ import { api } from '@/lib/api'
 import { detectFormat, guessType, parseNodeInputs, type NodeInputRow } from '@/lib/comfy-parse'
 import { extractComfyMetadata } from '@/lib/png-meta'
 import { suggestParams } from '@/lib/suggest-params'
+import { useHosts } from '@/hooks/use-comfy-status'
+import { referenceHost } from '@/lib/hosts'
 
 interface Selection {
   key: string
@@ -61,6 +63,8 @@ export default function TemplateImportPage() {
   const [pasteText, setPasteText] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const hosts = useHosts()
+  const reference = hosts ? referenceHost(hosts) : undefined
 
   const [searchParams] = useSearchParams()
   const from = searchParams.get('from')
@@ -304,6 +308,14 @@ export default function TemplateImportPage() {
       }}
     >
       <h1 className="text-xl font-semibold">导入 Workflow</h1>
+      {reference && reference.online === false && (
+        <div className="rounded-md border border-warning/40 bg-warning/10 px-4 py-2 text-sm text-warning">
+          参考主机「{reference.name}」离线，模型列表与节点校验暂不可用。
+          <Link to="/hosts" className="ml-1 underline">
+            切换参考主机
+          </Link>
+        </div>
+      )}
       <p className="text-sm text-muted-foreground">
         支持 UI 格式 / API 格式 JSON、ComfyUI 生成的 PNG(可直接拖拽到页面),或粘贴 JSON 文本。
       </p>

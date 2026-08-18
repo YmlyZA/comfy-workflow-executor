@@ -16,7 +16,8 @@ CREATE TABLE IF NOT EXISTS batches (
   template_id INTEGER NOT NULL REFERENCES templates(id),
   name TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  pinned_host_id INTEGER
 );
 CREATE TABLE IF NOT EXISTS jobs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,6 +56,11 @@ CREATE TABLE IF NOT EXISTS hosts (
   url TEXT NOT NULL,
   note TEXT,
   active INTEGER NOT NULL DEFAULT 0,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  kind TEXT NOT NULL DEFAULT 'resident',
+  rented_at TEXT,
+  hourly_rate REAL,
+  disabled_reason TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 `
@@ -73,6 +79,24 @@ export function createDb(path: string) {
   const jobCols = sqlite.prepare(`PRAGMA table_info(jobs)`).all() as Array<{ name: string }>
   if (!jobCols.some((c) => c.name === 'host_id')) {
     sqlite.exec(`ALTER TABLE jobs ADD COLUMN host_id INTEGER`)
+  }
+  // 旧库迁移:多主机并行调度新增列
+  const hostCols = sqlite.prepare(`PRAGMA table_info(hosts)`).all() as Array<{ name: string }>
+  const hasHostCol = (n: string) => hostCols.some((c) => c.name === n)
+  if (!hasHostCol('enabled')) {
+    sqlite.exec(`ALTER TABLE hosts ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1`)
+  }
+  if (!hasHostCol('kind')) {
+    sqlite.exec(`ALTER TABLE hosts ADD COLUMN kind TEXT NOT NULL DEFAULT 'resident'`)
+  }
+  if (!hasHostCol('rented_at')) sqlite.exec(`ALTER TABLE hosts ADD COLUMN rented_at TEXT`)
+  if (!hasHostCol('hourly_rate')) sqlite.exec(`ALTER TABLE hosts ADD COLUMN hourly_rate REAL`)
+  if (!hasHostCol('disabled_reason')) {
+    sqlite.exec(`ALTER TABLE hosts ADD COLUMN disabled_reason TEXT`)
+  }
+  const batchCols = sqlite.prepare(`PRAGMA table_info(batches)`).all() as Array<{ name: string }>
+  if (!batchCols.some((c) => c.name === 'pinned_host_id')) {
+    sqlite.exec(`ALTER TABLE batches ADD COLUMN pinned_host_id INTEGER`)
   }
   return drizzle(sqlite, { schema })
 }

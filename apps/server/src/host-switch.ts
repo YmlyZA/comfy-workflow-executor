@@ -27,16 +27,15 @@ export function createAsyncLock(): AsyncLock {
   }
 }
 
-/** 表/库已切换后重建连接:换 client、失效节点缓存、重启 executor、广播在线状态。
- * 主机切换与数据导入共用(导入的库自带 hosts 表,重开后同样要按 active 主机重连)。 */
+/** 切换参考主机:只换查询用 client 并失效节点缓存。
+ * 不再碰 executor —— 参考主机与「谁干活」已解耦(见 spec「active 退位」)。 */
 export async function reconnectComfy(
-  deps: Pick<AppDeps, 'db' | 'comfy' | 'events' | 'executor' | 'objectInfo'>,
+  deps: Pick<AppDeps, 'db' | 'comfy' | 'events' | 'objectInfo'>,
   host: { id: number; name: string; url: string },
 ): Promise<void> {
   const client = createComfyClient(host.url)
   deps.comfy = client
   deps.objectInfo?.invalidate()
-  deps.executor?.resume(deps.db, client)
   const online = await client.isUp()
   deps.events.emit('event', {
     type: 'comfy-status',

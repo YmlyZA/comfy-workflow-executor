@@ -49,11 +49,11 @@ describe('hosts repo', () => {
     expect(repo.listHosts(db)).toHaveLength(1)
   })
 
-  it('claimNextJob 盖章当前 active host id', () => {
+  it('claimNextJob 盖章传入的 host id', () => {
     const host = repo.ensureActiveHost(db, 'http://a:8188')
     const t = repo.createTemplate(db, { name: 'T', comfyJson: {}, params: [] })
     repo.createBatch(db, t.id, { name: 'B', jobs: [{}] })
-    const claimed = repo.claimNextJob(db)
+    const claimed = repo.claimNextJob(db, host.id)
     expect(claimed?.job.hostId).toBe(host.id)
   })
 
@@ -61,7 +61,7 @@ describe('hosts repo', () => {
     const host = repo.ensureActiveHost(db, 'http://a:8188')
     const t = repo.createTemplate(db, { name: 'T', comfyJson: {}, params: [] })
     const b = repo.createBatch(db, t.id, { name: 'B', jobs: [{}] })
-    repo.claimNextJob(db)
+    repo.claimNextJob(db, host.id)
     const detail = repo.getBatchDetail(db, b.id)!
     expect(detail.hostNames[host.id]).toBe(host.name)
   })

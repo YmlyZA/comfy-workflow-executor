@@ -260,7 +260,7 @@ describe('DELETE /api/batches/:id', () => {
     const b = await makeBatch()
     // 直接用 repo 把 batch 置为 running(模拟执行器认领)
     const { claimNextJob } = await import('../src/db/repo.js')
-    claimNextJob(db)
+    claimNextJob(db, 1)
     const del = await app.request(`/api/batches/${b.id}`, { method: 'DELETE', headers: H })
     expect(del.status).toBe(409)
     expect(await del.json()).toEqual({ error: 'batch is running' })
@@ -324,6 +324,22 @@ describe('DELETE /api/batches/:id purgeGpu', () => {
   function makeComfyApp() {
     const comfy = new FakeComfy()
     const localDb = createDb(':memory:')
+    // 盖章要落到「当前 active 主机」才能让 purgeGpu 分组归 null 组、直接走 deps.comfy
+    const host = repo.ensureActiveHost(localDb, 'http://local:8188')
+    const localDeps: AppDeps = {
+      config: loadConfig({ AUTH_TOKEN: 'secret' }),
+      db: localDb,
+      comfy,
+      events: new EventEmitter(),
+    }
+    const localApp = createApp(localDeps)
+    return { comfy, localDb, localApp, localDeps, host }
+  }
+
+  /** 建一个跳过默认种子主机的干净 db(用于测试用例自己掌控主机拓扑) */
+  function makeComfyAppNoHost() {
+    const comfy = new FakeComfy()
+    const localDb = createDb(':memory:')
     const localDeps: AppDeps = {
       config: loadConfig({ AUTH_TOKEN: 'secret' }),
       db: localDb,
@@ -335,27 +351,27 @@ describe('DELETE /api/batches/:id purgeGpu', () => {
   }
 
   /** 建一个已完成 batch:job0 两个输出同 gpu 引用(测去重),job1 一个无引用输出(测跳过) */
-  function seedFinished(localDb: Db) {
+  function seedFinished(localDb: Db, hostId: number) {
     const t = repo.createTemplate(localDb, {
       name: 'T',
       comfyJson: templateBody.comfyJson,
       params: templateBody.params as any,
     })
     const b = repo.createBatch(localDb, t.id, { name: 'B', jobs: [{ prompt: 'a' }, { prompt: 'b' }] })
-    const c1 = repo.claimNextJob(localDb)!
+    const c1 = repo.claimNextJob(localDb, hostId)!
     repo.finishJob(localDb, c1.job.id, [
       { path: `${b.id}/0-0-a.png`, filename: '0-0-a.png', gpu: { filename: 'a.png', subfolder: 'sub' } },
       { path: `${b.id}/0-1-b.png`, filename: '0-1-b.png', gpu: { filename: 'a.png', subfolder: 'sub' } },
     ])
-    const c2 = repo.claimNextJob(localDb)!
+    const c2 = repo.claimNextJob(localDb, hostId)!
     repo.finishJob(localDb, c2.job.id, [{ path: `${b.id}/1-0-old.png`, filename: '1-0-old.png' }])
     repo.markBatchCompletedIfDone(localDb, b.id)
     return b
   }
 
   it('收集引用去重传给扩展,无引用输出计入 gpuSkipped', async () => {
-    const { comfy, localDb, localApp } = makeComfyApp()
-    const b = seedFinished(localDb)
+    const { comfy, localDb, localApp, host } = makeComfyApp()
+    const b = seedFinished(localDb, host.id)
     const res = await localApp.request(`/api/batches/${b.id}?purgeGpu=1`, {
       method: 'DELETE',
       headers: H,
@@ -366,8 +382,8 @@ describe('DELETE /api/batches/:id purgeGpu', () => {
   })
 
   it('删除与主机切换共锁串行:锁被占用时排队,释放后才执行', async () => {
-    const { comfy, localDb, localApp, localDeps } = makeComfyApp()
-    const b = seedFinished(localDb)
+    const { comfy, localDb, localApp, localDeps, host } = makeComfyApp()
+    const b = seedFinished(localDb, host.id)
     let release!: () => void
     const gate = new Promise<void>((r) => {
       release = r
@@ -389,8 +405,8 @@ describe('DELETE /api/batches/:id purgeGpu', () => {
   }, 15000)
 
   it('扩展调用抛错时 gpuPurgeFailed 且 batch 已删', async () => {
-    const { comfy, localDb, localApp } = makeComfyApp()
-    const b = seedFinished(localDb)
+    const { comfy, localDb, localApp, host } = makeComfyApp()
+    const b = seedFinished(localDb, host.id)
     comfy.cweDeleteOutputFiles = async () => {
       throw new Error('extension missing')
     }
@@ -404,8 +420,8 @@ describe('DELETE /api/batches/:id purgeGpu', () => {
   })
 
   it('扩展返回 failed 非空时 gpuPurgeFailed', async () => {
-    const { comfy, localDb, localApp } = makeComfyApp()
-    const b = seedFinished(localDb)
+    const { comfy, localDb, localApp, host } = makeComfyApp()
+    const b = seedFinished(localDb, host.id)
     comfy.cweDeleteResult = { deleted: 0, missing: 0, failed: ['sub/a.png'] }
     const res = await localApp.request(`/api/batches/${b.id}?purgeGpu=1`, {
       method: 'DELETE',
@@ -415,14 +431,14 @@ describe('DELETE /api/batches/:id purgeGpu', () => {
   })
 
   it('全部输出无 gpu 引用时不调扩展', async () => {
-    const { comfy, localDb, localApp } = makeComfyApp()
+    const { comfy, localDb, localApp, host } = makeComfyApp()
     const t = repo.createTemplate(localDb, {
       name: 'T2',
       comfyJson: templateBody.comfyJson,
       params: templateBody.params as any,
     })
     const b = repo.createBatch(localDb, t.id, { name: 'B2', jobs: [{ prompt: 'a' }] })
-    const c1 = repo.claimNextJob(localDb)!
+    const c1 = repo.claimNextJob(localDb, host.id)!
     repo.finishJob(localDb, c1.job.id, [{ path: `${b.id}/0-0-x.png`, filename: '0-0-x.png' }])
     repo.markBatchCompletedIfDone(localDb, b.id)
     const res = await localApp.request(`/api/batches/${b.id}?purgeGpu=1`, {
@@ -434,8 +450,8 @@ describe('DELETE /api/batches/:id purgeGpu', () => {
   })
 
   it('不带 purgeGpu 时不收集也不调扩展', async () => {
-    const { comfy, localDb, localApp } = makeComfyApp()
-    const b = seedFinished(localDb)
+    const { comfy, localDb, localApp, host } = makeComfyApp()
+    const b = seedFinished(localDb, host.id)
     const res = await localApp.request(`/api/batches/${b.id}`, { method: 'DELETE', headers: H })
     expect(await res.json()).toEqual({ ok: true })
     expect(comfy.cweDeleted).toHaveLength(0)
@@ -449,7 +465,7 @@ describe('DELETE /api/batches/:id purgeGpu', () => {
       comfy: null,
       events: new EventEmitter(),
     })
-    const b = seedFinished(localDb)
+    const b = seedFinished(localDb, 1)
     const res = await localApp.request(`/api/batches/${b.id}?purgeGpu=1`, {
       method: 'DELETE',
       headers: H,
@@ -458,8 +474,8 @@ describe('DELETE /api/batches/:id purgeGpu', () => {
   })
 
   it('cancel 已结束的 batch 返回 409 且状态不被改写', async () => {
-    const { localDb, localApp } = makeComfyApp()
-    const b = seedFinished(localDb)
+    const { localDb, localApp, host } = makeComfyApp()
+    const b = seedFinished(localDb, host.id)
     expect(repo.getBatchStatus(localDb, b.id)).toBe('completed')
     const res = await localApp.request(`/api/batches/${b.id}/cancel`, { method: 'POST', headers: H })
     expect(res.status).toBe(409)
@@ -467,8 +483,8 @@ describe('DELETE /api/batches/:id purgeGpu', () => {
   })
 
   it('扩展返回 missing 时上报 gpuMissing(不再静默当成功)', async () => {
-    const { comfy, localDb, localApp } = makeComfyApp()
-    const b = seedFinished(localDb)
+    const { comfy, localDb, localApp, host } = makeComfyApp()
+    const b = seedFinished(localDb, host.id)
     comfy.cweDeleteResult = { deleted: 0, missing: 1, failed: [] }
     const res = await localApp.request(`/api/batches/${b.id}?purgeGpu=1`, {
       method: 'DELETE',
@@ -499,12 +515,12 @@ describe('DELETE /api/batches/:id purgeGpu', () => {
       params: templateBody.params as any,
     })
     const b = repo.createBatch(localDb, t.id, { name: 'B', jobs: [{ prompt: 'a' }, { prompt: 'b' }] })
-    const c1 = repo.claimNextJob(localDb)! // 盖 h1 章
+    const c1 = repo.claimNextJob(localDb, h1.id)! // 盖 h1 章
     repo.finishJob(localDb, c1.job.id, [
       { path: `${b.id}/0-0-a.png`, filename: '0-0-a.png', gpu: { filename: 'a.png', subfolder: '' } },
     ])
     repo.activateHost(localDb, h2.id)
-    const c2 = repo.claimNextJob(localDb)! // 盖 h2 章(现为 active,对应 deps.comfy)
+    const c2 = repo.claimNextJob(localDb, h2.id)! // 盖 h2 章(现为 active,对应 deps.comfy)
     repo.finishJob(localDb, c2.job.id, [
       { path: `${b.id}/1-0-b.png`, filename: '1-0-b.png', gpu: { filename: 'b.png', subfolder: '' } },
     ])
@@ -524,7 +540,7 @@ describe('DELETE /api/batches/:id purgeGpu', () => {
   })
 
   it('执行主机已被删除的分组标记 gpuPurgeFailed', async () => {
-    const { comfy, localDb, localApp } = makeComfyApp()
+    const { comfy, localDb, localApp } = makeComfyAppNoHost()
     const h1 = repo.ensureActiveHost(localDb, 'http://h1:8188')
     const h2 = repo.createHost(localDb, { name: 'H2', url: 'http://h2:8188' })
     const t = repo.createTemplate(localDb, {
@@ -533,7 +549,7 @@ describe('DELETE /api/batches/:id purgeGpu', () => {
       params: templateBody.params as any,
     })
     const b = repo.createBatch(localDb, t.id, { name: 'B', jobs: [{ prompt: 'a' }] })
-    const c1 = repo.claimNextJob(localDb)! // 盖 h1 章
+    const c1 = repo.claimNextJob(localDb, h1.id)! // 盖 h1 章
     repo.finishJob(localDb, c1.job.id, [
       { path: `${b.id}/0-0-a.png`, filename: '0-0-a.png', gpu: { filename: 'a.png', subfolder: '' } },
     ])
@@ -547,5 +563,172 @@ describe('DELETE /api/batches/:id purgeGpu', () => {
     const body = (await res.json()) as any
     expect(body.gpuPurgeFailed).toBe(true)
     expect(comfy.cweDeleted).toHaveLength(0) // 不会错发到当前主机
+  })
+
+  /** 取消批次:并行下 deps.comfy(参考主机)几乎肯定在跑**别的**批次,
+   * 朝它发 interrupt 等于误杀无辜任务,还会把健康的参考主机推向熔断 */
+  function makeTwoHostApp() {
+    const comfy = new FakeComfy() // 参考主机 h1 的 client
+    const remote = new FakeComfy() // h2 的临时 client
+    const localDb = createDb(':memory:')
+    const localApp = createApp({
+      config: loadConfig({ AUTH_TOKEN: 'secret' }),
+      db: localDb,
+      comfy,
+      events: new EventEmitter(),
+      comfyFactory: () => remote,
+    })
+    const h1 = repo.ensureActiveHost(localDb, 'http://h1:8188')
+    const h2 = repo.createHost(localDb, { name: 'H2', url: 'http://h2:8188' })
+    const t = repo.createTemplate(localDb, {
+      name: 'T',
+      comfyJson: templateBody.comfyJson,
+      params: templateBody.params as any,
+    })
+    return { comfy, remote, localDb, localApp, h1, h2, t }
+  }
+
+  it('取消批次只中断执行该任务的主机,参考主机手上的任务不受影响', async () => {
+    const { comfy, remote, localDb, localApp, h1, h2, t } = makeTwoHostApp()
+    const b1 = repo.createBatch(localDb, t.id, { name: 'B1', jobs: [{ prompt: 'a' }] })
+    const b2 = repo.createBatch(localDb, t.id, { name: 'B2', jobs: [{ prompt: 'b' }] })
+    const onH1 = repo.claimNextJob(localDb, h1.id)! // 参考主机在跑 b1
+    const onH2 = repo.claimNextJob(localDb, h2.id)! // h2 在跑 b2
+    const res = await localApp.request(`/api/batches/${b2.id}/cancel`, { method: 'POST', headers: H })
+    expect(res.status).toBe(200)
+    expect(remote.interrupts).toBe(1)
+    expect(comfy.interrupts).toBe(0) // 回归点:旧实现无条件打断参考主机
+    expect(repo.getJob(localDb, onH1.job.id)!.status).toBe('running')
+    expect(repo.getJob(localDb, onH2.job.id)!.status).toBe('canceled')
+    void b1
+  })
+
+  it('同批任务分布在多台主机时逐台中断', async () => {
+    const { comfy, remote, localDb, localApp, h1, h2, t } = makeTwoHostApp()
+    const b = repo.createBatch(localDb, t.id, { name: 'B', jobs: [{ prompt: 'a' }, { prompt: 'b' }] })
+    repo.claimNextJob(localDb, h1.id)
+    repo.claimNextJob(localDb, h2.id)
+    const res = await localApp.request(`/api/batches/${b.id}/cancel`, { method: 'POST', headers: H })
+    expect(res.status).toBe(200)
+    expect(comfy.interrupts).toBe(1) // 参考主机这次确实有份
+    expect(remote.interrupts).toBe(1)
+  })
+
+  it('一台主机的 interrupt 迟迟不返回,不阻塞其余主机被中断', async () => {
+    const { comfy, remote, localDb, localApp, h1, h2, t } = makeTwoHostApp()
+    const b = repo.createBatch(localDb, t.id, { name: 'B', jobs: [{ prompt: 'a' }, { prompt: 'b' }] })
+    repo.claimNextJob(localDb, h1.id)
+    repo.claimNextJob(localDb, h2.id)
+    // h1(参考主机)的 interrupt 卡住不返回,模拟不可达/卡死的 ComfyUI
+    let resolveH1: () => void = () => {}
+    const h1Pending = new Promise<void>((resolve) => {
+      resolveH1 = resolve
+    })
+    comfy.interrupt = async () => {
+      comfy.interrupts++
+      await h1Pending
+    }
+    const resPromise = localApp.request(`/api/batches/${b.id}/cancel`, { method: 'POST', headers: H })
+    // 让事件循环跑一轮,给两个 interrupt 调用机会推进到各自的第一个 await
+    await new Promise((r) => setTimeout(r, 0))
+    // 回归点:串行版本下,h2 要等 h1 的 interrupt 落定才会被调用——这里 h1 还卡着,
+    // 若 h2.interrupts 仍是 0 就说明退回了串行实现
+    expect(remote.interrupts).toBe(1)
+    expect(comfy.interrupts).toBe(1)
+    resolveH1()
+    const res = await resPromise
+    expect(res.status).toBe(200)
+  })
+
+  it('执行主机的行已被删除时照常取消,不报错', async () => {
+    const { comfy, remote, localDb, localApp, h2, t } = makeTwoHostApp()
+    const b = repo.createBatch(localDb, t.id, { name: 'B', jobs: [{ prompt: 'a' }] })
+    repo.claimNextJob(localDb, h2.id)
+    expect(repo.deleteHost(localDb, h2.id)).toBe('ok')
+    const res = await localApp.request(`/api/batches/${b.id}/cancel`, { method: 'POST', headers: H })
+    expect(res.status).toBe(200)
+    expect(remote.interrupts).toBe(0)
+    expect(comfy.interrupts).toBe(0) // 主机没了也不迁怒参考主机
+    expect(repo.getBatchStatus(localDb, b.id)).toBe('canceled')
+  })
+})
+
+describe('建批自动锁定主机', () => {
+  it('image 值不在本地 uploads 时锁定到参考主机', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'cwe-pin-'))
+    mkdirSync(join(dataDir, 'uploads'), { recursive: true })
+    const localDb = createDb(':memory:')
+    const localApp = createApp({
+      config: loadConfig({ AUTH_TOKEN: 'secret', DATA_DIR: dataDir }),
+      db: localDb,
+      comfy: null,
+      events: new EventEmitter(),
+    })
+    const tpl = repo.createTemplate(localDb, {
+      name: 't-pin',
+      comfyJson: { '10': { class_type: 'LoadImage', inputs: { image: 'x.png' } } },
+      params: [{ key: 'img', label: '图', nodeId: '10', inputName: 'image', type: 'image' }],
+    })
+    const host = repo.createHost(localDb, { name: 'A', url: 'http://a:8188' })
+    repo.activateHost(localDb, host.id)
+    const res = await localApp.request(`/api/templates/${tpl.id}/batches`, {
+      method: 'POST',
+      headers: H,
+      body: JSON.stringify({ name: 'b', jobs: [{ img: 'only-on-gpu.png' }] }),
+    })
+    const batch = (await res.json()) as any
+    expect(batch.pinnedHostId).toBe(host.id)
+  })
+
+  it('image 值都是本地 uploads 文件时不锁定', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'cwe-no-pin-'))
+    const uploadsDir = join(dataDir, 'uploads')
+    mkdirSync(uploadsDir, { recursive: true })
+    writeFileSync(join(uploadsDir, 'local.png'), 'x')
+    const localDb = createDb(':memory:')
+    const localApp = createApp({
+      config: loadConfig({ AUTH_TOKEN: 'secret', DATA_DIR: dataDir }),
+      db: localDb,
+      comfy: null,
+      events: new EventEmitter(),
+    })
+    const tpl = repo.createTemplate(localDb, {
+      name: 't-local',
+      comfyJson: { '10': { class_type: 'LoadImage', inputs: { image: 'x.png' } } },
+      params: [{ key: 'img', label: '图', nodeId: '10', inputName: 'image', type: 'image' }],
+    })
+    repo.activateHost(localDb, repo.createHost(localDb, { name: 'A', url: 'http://a:8188' }).id)
+    const res = await localApp.request(`/api/templates/${tpl.id}/batches`, {
+      method: 'POST',
+      headers: H,
+      body: JSON.stringify({ name: 'b', jobs: [{ img: 'local.png' }] }),
+    })
+    const batch = (await res.json()) as any
+    expect(batch.pinnedHostId).toBeNull()
+  })
+
+  it('无 image 参数的模板不锁定', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'cwe-text-'))
+    mkdirSync(join(dataDir, 'uploads'), { recursive: true })
+    const localDb = createDb(':memory:')
+    const localApp = createApp({
+      config: loadConfig({ AUTH_TOKEN: 'secret', DATA_DIR: dataDir }),
+      db: localDb,
+      comfy: null,
+      events: new EventEmitter(),
+    })
+    const tpl = repo.createTemplate(localDb, {
+      name: 't-text',
+      comfyJson: { '6': { class_type: 'CLIPTextEncode', inputs: { text: 'x' } } },
+      params: [{ key: 'p', label: 'P', nodeId: '6', inputName: 'text', type: 'text' }],
+    })
+    repo.activateHost(localDb, repo.createHost(localDb, { name: 'A', url: 'http://a:8188' }).id)
+    const res = await localApp.request(`/api/templates/${tpl.id}/batches`, {
+      method: 'POST',
+      headers: H,
+      body: JSON.stringify({ name: 'b', jobs: [{ p: 'hi' }] }),
+    })
+    const batch = (await res.json()) as any
+    expect(batch.pinnedHostId).toBeNull()
   })
 })

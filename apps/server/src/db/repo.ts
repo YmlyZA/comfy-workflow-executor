@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, isNotNull, lt, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, notInArray, or, sql } from 'drizzle-orm'
 import type { CreateBatchInput, CreateTemplateInput, OutputFile, ParamValues } from '@cwe/shared'
 import type { Db } from './index.js'
 import { batches, hosts, inputHistory, jobs, prompts, templates, type Batch, type Host, type Job, type Prompt, type Template } from './schema.js'
@@ -53,9 +53,18 @@ export function reorderTemplates(db: Db, ids: number[]): 'ok' | 'unknown-id' | '
 
 // -- batches --
 
-export function createBatch(db: Db, templateId: number, input: CreateBatchInput): Batch {
+export function createBatch(
+  db: Db,
+  templateId: number,
+  input: CreateBatchInput,
+  pinnedHostId?: number | null,
+): Batch {
   return db.transaction((tx) => {
-    const batch = tx.insert(batches).values({ templateId, name: input.name }).returning().get()
+    const batch = tx
+      .insert(batches)
+      .values({ templateId, name: input.name, pinnedHostId: pinnedHostId ?? null })
+      .returning()
+      .get()
     tx.insert(jobs)
       .values(input.jobs.map((params, i) => ({ batchId: batch.id, sortOrder: i, params })))
       .run()
@@ -73,6 +82,7 @@ export function listBatches(
       name: batches.name,
       status: batches.status,
       createdAt: batches.createdAt,
+      pinnedHostId: batches.pinnedHostId,
       templateName: templates.name,
       total: sql<number>`count(${jobs.id})`,
       succeeded: sql<number>`sum(case when ${jobs.status} = 'succeeded' then 1 else 0 end)`,
@@ -124,17 +134,23 @@ export function getActiveHost(db: Db): Host | undefined {
   return db.select().from(hosts).where(eq(hosts.active, 1)).get()
 }
 
-export function createHost(
-  db: Db,
-  input: { name: string; url: string; note?: string | null },
-): Host {
+export interface HostWritable {
+  name: string
+  url: string
+  note?: string | null
+  kind?: 'resident' | 'rental'
+  rentedAt?: string | null
+  hourlyRate?: number | null
+}
+
+export function createHost(db: Db, input: HostWritable): Host {
   return db.insert(hosts).values(input).returning().get()
 }
 
 export function updateHost(
   db: Db,
   id: number,
-  patch: { name?: string; url?: string; note?: string | null },
+  patch: Partial<HostWritable>,
 ): Host | undefined {
   return db.update(hosts).set(patch).where(eq(hosts.id, id)).returning().get()
 }
@@ -174,13 +190,28 @@ export function ensureActiveHost(db: Db, seedUrl: string): Host {
 
 // -- executor queue --
 
-export function claimNextJob(db: Db): { job: Job; template: Template } | undefined {
+/**
+ * 认领下一个待执行任务并盖上主机章。
+ *
+ * **本函数必须保持同步、不得引入 await。** 并行认领的互斥完全依赖
+ * 「better-sqlite3 同步事务 + Node 单线程 = 事务即临界区」:整段查-改-返回
+ * 跑完,下一个 worker 才能开始。一旦函数体内出现 await,两个 worker 的
+ * 认领事务就会交错,同一个 job 会被重复派发。
+ */
+export function claimNextJob(db: Db, hostId: number): { job: Job; template: Template } | undefined {
   return db.transaction((tx) => {
     const row = tx
       .select({ job: jobs, batch: batches })
       .from(jobs)
       .innerJoin(batches, eq(jobs.batchId, batches.id))
-      .where(and(eq(jobs.status, 'pending'), inArray(batches.status, ['pending', 'running'])))
+      .where(
+        and(
+          eq(jobs.status, 'pending'),
+          inArray(batches.status, ['pending', 'running']),
+          // 锁定批次只能被指定主机认领;其余主机跳过它继续取后面的活
+          or(isNull(batches.pinnedHostId), eq(batches.pinnedHostId, hostId)),
+        ),
+      )
       .orderBy(asc(batches.id), asc(jobs.sortOrder))
       .limit(1)
       .get()
@@ -189,12 +220,7 @@ export function claimNextJob(db: Db): { job: Job; template: Template } | undefin
     if (!template) return undefined
     const job = tx
       .update(jobs)
-      .set({
-        status: 'running',
-        startedAt: now(),
-        error: null,
-        hostId: sql<number | null>`(SELECT id FROM hosts WHERE active = 1)`,
-      })
+      .set({ status: 'running', startedAt: now(), error: null, hostId })
       .where(and(eq(jobs.id, row.job.id), eq(jobs.status, 'pending')))
       .returning()
       .get()
@@ -237,10 +263,74 @@ export function listRunningJobs(db: Db): Job[] {
 }
 
 export function resetJobToPending(db: Db, jobId: number): void {
+  // hostId 一并清空:pending 任务不属于任何主机,否则 UI「主机」列会显示上一台
   db.update(jobs)
-    .set({ status: 'pending', comfyPromptId: null, startedAt: null })
+    .set({ status: 'pending', comfyPromptId: null, startedAt: null, hostId: null })
     .where(eq(jobs.id, jobId))
     .run()
+}
+
+export function listRunningJobsByHost(db: Db, hostId: number): Job[] {
+  return db
+    .select()
+    .from(jobs)
+    .where(and(eq(jobs.status, 'running'), eq(jobs.hostId, hostId)))
+    .all()
+}
+
+/** 启动时回收无主的 running job:主机已删除/已停用/历史数据没盖章 */
+export function reclaimOrphanJobs(db: Db, liveHostIds: number[]): number {
+  return db.transaction((tx) => {
+    const orphans = tx
+      .select({ id: jobs.id })
+      .from(jobs)
+      .where(
+        and(
+          eq(jobs.status, 'running'),
+          liveHostIds.length > 0
+            ? or(isNull(jobs.hostId), notInArray(jobs.hostId, liveHostIds))
+            : sql`1 = 1`,
+        ),
+      )
+      .all()
+    for (const o of orphans) {
+      tx.update(jobs)
+        .set({ status: 'pending', comfyPromptId: null, startedAt: null, hostId: null })
+        .where(eq(jobs.id, o.id))
+        .run()
+    }
+    return orphans.length
+  })
+}
+
+export function listEnabledHosts(db: Db): Host[] {
+  return db.select().from(hosts).where(eq(hosts.enabled, 1)).orderBy(asc(hosts.id)).all()
+}
+
+export function setHostEnabled(
+  db: Db,
+  id: number,
+  enabled: boolean,
+  reason?: string | null,
+): Host | undefined {
+  return db
+    .update(hosts)
+    // 启用即清空停用原因;停用可带原因(熔断)或不带(手动)
+    .set({ enabled: enabled ? 1 : 0, disabledReason: enabled ? null : (reason ?? null) })
+    .where(eq(hosts.id, id))
+    .returning()
+    .get()
+}
+
+/** 锁定到该主机、且尚未结束的批次数(删除主机时给用户的警告) */
+export function countPinnedUnfinishedBatches(db: Db, hostId: number): number {
+  return (
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(batches)
+      .where(and(eq(batches.pinnedHostId, hostId), inArray(batches.status, ['pending', 'running'])))
+      .get()?.n ?? 0
+  )
 }
 
 export function markBatchCompletedIfDone(db: Db, batchId: number): boolean {
@@ -258,13 +348,17 @@ export function markBatchCompletedIfDone(db: Db, batchId: number): boolean {
   })
 }
 
-export function cancelBatch(db: Db, id: number): Job | undefined {
+/** 取消整批,返回被取消掉的**全部** running job。
+ * 并行调度下同一批的任务可能同时跑在多台主机上,只返回一个的话另外几台收不到
+ * interrupt,会继续把已取消的任务出完图(finishJob 再被 status='running' 守卫挡掉,
+ * 产物白下载),所以这里返回数组由调用方逐台中断。 */
+export function cancelBatch(db: Db, id: number): Job[] {
   return db.transaction((tx) => {
     const running = tx
       .select()
       .from(jobs)
       .where(and(eq(jobs.batchId, id), eq(jobs.status, 'running')))
-      .get()
+      .all()
     tx.update(jobs)
       .set({ status: 'canceled', finishedAt: now() })
       .where(and(eq(jobs.batchId, id), inArray(jobs.status, ['pending', 'running'])))

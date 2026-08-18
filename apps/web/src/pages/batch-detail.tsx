@@ -25,6 +25,7 @@ import {
 import { ImageCompare } from '@/components/image-compare'
 import { OfflineBanner } from '@/components/offline-banner'
 import { useEvents } from '@/hooks/use-events'
+import { useHosts } from '@/hooks/use-comfy-status'
 import { api, comfyInputFileUrl, downloadUrl, errorMessage, outputUrl, uploadFileUrl } from '@/lib/api'
 import { imageParamsOf, imageParamValue } from '@/lib/image-params'
 import { StatusBadge } from '@/pages/batches'
@@ -45,7 +46,13 @@ export interface JobDto {
 }
 
 export interface BatchDetailDto {
-  batch: { id: number; name: string; status: BatchStatus; createdAt: string }
+  batch: {
+    id: number
+    name: string
+    status: BatchStatus
+    createdAt: string
+    pinnedHostId: number | null
+  }
   template: TemplateDto
   jobs: JobDto[]
   nav: { prevId: number | null; nextId: number | null }
@@ -58,6 +65,7 @@ export default function BatchDetailPage() {
   const [lightbox, setLightbox] = useState<number | null>(null)
   const qc = useQueryClient()
   const progress = useEvents()
+  const hosts = useHosts()
   const { data, isPending, error } = useQuery({
     queryKey: ['batches', id],
     queryFn: () => api<BatchDetailDto>(`/batches/${id}`),
@@ -172,6 +180,27 @@ export default function BatchDetailPage() {
           </Button>
         </div>
       </div>
+
+      {batch.pinnedHostId != null &&
+        hosts &&
+        (() => {
+          const pinned = hosts.find((h) => h.id === batch.pinnedHostId)
+          const usable = pinned && pinned.enabled === 1 && pinned.online === true
+          if (usable) return null
+          return (
+            <div className="rounded-md border border-warning/40 bg-warning/10 px-4 py-2 text-sm text-warning">
+              本批次锁定在主机「{pinned?.name ?? `#${batch.pinnedHostId}`}」
+              {pinned == null
+                ? '（该主机已被删除）'
+                : pinned.enabled !== 1
+                  ? '（该主机未参与调度）'
+                  : pinned.online === false
+                    ? '（该主机离线）'
+                    : '（该主机尚未探测到在线，可能离线）'}
+              ，任务暂时无人执行。
+            </div>
+          )
+        })()}
 
       <OfflineBanner hasActiveWork={['pending', 'running'].includes(batch.status)} />
 

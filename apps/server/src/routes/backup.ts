@@ -85,7 +85,7 @@ export function backupRoutes(deps: AppDeps) {
       // 整段进锁:与主机切换(activate / 改 active URL)互斥,否则两边各自 pause→resume
       // 会同时起两个 executor loop(详见 host-switch.ts)
       await lock.run(async () => {
-        await deps.executor?.pause()
+        await deps.executor?.pauseAll()
         deps.db.$client.close()
         const bak = join(dataDir, `.bak-${stamp}`)
         try {
@@ -98,9 +98,17 @@ export function backupRoutes(deps: AppDeps) {
             await mkdir(join(dataDir, 'outputs'), { recursive: true })
             const reopened = createDb(join(dataDir, 'db.sqlite'))
             deps.db = reopened
-            // 导入的库自带 hosts 表(或旧版库由 ensureActiveHost 补种),按其 active 主机
-            // 重建连接并广播在线状态(与主机切换同一套流程)
+            // 导入的库自带 hosts 表(或旧版库在此由 ensureActiveHost 补种默认主机)。
+            // 必须先播完种再 resumeAll——resumeAll 内部的 syncFromDb 只按 hosts 表现状起
+            // worker,顺序反过来的话,导入一个没有 hosts 表的旧版备份会让 hosts 表在
+            // resumeAll 那一刻还是空的,起不出任何 worker,种好的默认主机也没人再补 sync
             const activeHost = ensureActiveHost(reopened, deps.config.comfyUrl)
+            // reconnectComfy 已不碰 executor(Task 6 起收窄为只换查询 client);pauseAll 的另一半
+            // 必须在这里显式补上,否则整个池永久停在暂停态。swapContents 失败时也会走到这里
+            // (它已把 dataDir 回滚回旧库),reopened 此时装的是旧库,worker 照样按旧库 hosts 表重建,
+            // 不会因为回滚就漏掉恢复
+            deps.executor?.resumeAll(reopened)
+            // 按其 active 主机重建连接并广播在线状态(与主机切换同一套流程)
             await reconnectComfy(deps, activeHost)
           } catch (reopenErr) {
             console.error('导入后重开数据库失败,需要重启服务', reopenErr)

@@ -5,12 +5,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import archiver from 'archiver'
 import Database from 'better-sqlite3'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, type AppDeps } from '../src/app.js'
 import { loadConfig } from '../src/config.js'
-import { createDb } from '../src/db/index.js'
+import { createDb, type Db } from '../src/db/index.js'
 import * as repo from '../src/db/repo.js'
+import { ExecutorPool } from '../src/executor-pool.js'
 import { extractZip } from '../src/zip.js'
+import { FakeComfy } from './fake-comfy.js'
 
 const H = { Authorization: 'Bearer secret' }
 
@@ -26,6 +28,23 @@ function makeApp(dataDir: string) {
     executor: null,
   }
   return { app: createApp(deps), deps }
+}
+
+/** 造一个「不真的跑 worker」的 ExecutorPool:pauseAll/resumeAll 替换成调用方传入的记录逻辑,
+ * 保持与原先手写 { pause, resume } 桩等价的断言能力 */
+function fakePool(
+  db: Db,
+  events: EventEmitter,
+  dataDir: string,
+  impls: {
+    pauseAll?: (opts?: { abandon?: boolean }) => Promise<void>
+    resumeAll?: (db: Db) => void
+  },
+): ExecutorPool {
+  const pool = new ExecutorPool({ db, events, dataDir, comfyFactory: () => new FakeComfy() })
+  if (impls.pauseAll) vi.spyOn(pool, 'pauseAll').mockImplementation(impls.pauseAll)
+  if (impls.resumeAll) vi.spyOn(pool, 'resumeAll').mockImplementation(impls.resumeAll)
+  return pool
 }
 
 let dataDir: string
@@ -113,19 +132,41 @@ describe('POST /api/import', () => {
     expect(row.name).toBe('OLD')
   })
 
+  it('导入没有 hosts 表的旧版备份后,ensureActiveHost 补种的默认主机会被 syncFromDb 起出 worker', async () => {
+    // 用真实 ExecutorPool(不 mock pauseAll/resumeAll),才能验证 resumeAll 内部
+    // 真的按新库 hosts 表(含 ensureActiveHost 刚种下的默认主机)重建出 worker——
+    // 上面那条按序调用的测试和其他既有导入测试全都 mock 掉了 resumeAll,盖不住这条路径
+    deps.executor = new ExecutorPool({
+      db: deps.db,
+      events: deps.events,
+      dataDir,
+      comfyFactory: () => new FakeComfy(),
+    })
+    // buildBackupZip 造的备份只含一条 template,不含 hosts 表数据——正是「旧版备份」
+    // 或者说 ensureActiveHost 存在的理由:import 完必须由它补种默认主机
+    const zip = await buildBackupZip('NO-HOSTS-TABLE')
+    const res = await app.request('/api/import', { method: 'POST', headers: HZ, body: new Uint8Array(zip) })
+    expect(res.status).toBe(200)
+    const active = repo.getActiveHost(deps.db)
+    expect(active).toBeDefined()
+    // 回归点:若 resumeAll 在 ensureActiveHost 播种之前跑,这里会是 false——
+    // resumeAll 那一刻 hosts 表还是空的,起不出任何 worker,种完也没人再补 sync
+    expect(deps.executor.hasWorker(active!.id)).toBe(true)
+  })
+
   it('导入时按序调用 executor pause→resume,resume 收到重开后的新 db', async () => {
     const calls: string[] = []
     let resumedDb: unknown = null
     const oldDb = deps.db
-    deps.executor = {
-      pause: async () => {
+    deps.executor = fakePool(deps.db, deps.events, dataDir, {
+      pauseAll: async () => {
         calls.push('pause')
       },
-      resume: (db) => {
+      resumeAll: (db) => {
         calls.push('resume')
         resumedDb = db
       },
-    }
+    })
     const zip = await buildBackupZip('X')
     const res = await app.request('/api/import', { method: 'POST', headers: HZ, body: new Uint8Array(zip) })
     expect(res.status).toBe(200)
@@ -134,43 +175,48 @@ describe('POST /api/import', () => {
     expect(resumedDb).not.toBe(oldDb)
   })
 
-  it('导入与主机切换共用切换锁,不会交错', async () => {
+  it('导入与主机路由共用切换锁,不会交错', async () => {
+    // activate 自 Task 6 起已不再碰 executor(不再 pauseAll),没法再借它验证锁——
+    // 换成同样仍走 deps.switchLock 临界区、且仍会碰 executor 的 POST /:id/disable。
     const calls: string[] = []
     let release!: () => void
     const gate = new Promise<void>((r) => {
       release = r
     })
-    let first = true
-    deps.executor = {
-      pause: async () => {
+    deps.executor = fakePool(deps.db, deps.events, dataDir, {
+      pauseAll: async () => {
         calls.push('pause-start')
-        if (first) {
-          first = false
-          await gate
-        }
+        await gate
         calls.push('pause-end')
       },
-      resume: () => calls.push('resume'),
-    }
-    repo.ensureActiveHost(deps.db, 'http://a:8188')
+      resumeAll: () => calls.push('resume'),
+    })
     const other = repo.createHost(deps.db, { name: 'B', url: 'http://b:8188' })
     const zip = await buildBackupZip('LOCKED')
 
-    const pAct = app.request(`/api/hosts/${other.id}/activate`, {
+    // 导入先拿到锁,卡在 pauseAll 里(gate 未释放)
+    const pImp = app.request('/api/import', { method: 'POST', headers: HZ, body: new Uint8Array(zip) })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(calls).toEqual(['pause-start'])
+
+    // disable 排在导入后面:若两处临界区不共享同一把锁(或任一处的 lock.run 被拿掉),
+    // 这里会在 release() 之前就把 other 停用,下面这条断言会先失败
+    const pDis = app.request(`/api/hosts/${other.id}/disable`, {
       method: 'POST',
       headers: { ...H, 'Content-Type': 'application/json' },
       body: JSON.stringify({ mode: 'wait' }),
     })
     await new Promise((r) => setTimeout(r, 20))
-    const pImp = app.request('/api/import', { method: 'POST', headers: HZ, body: new Uint8Array(zip) })
-    await new Promise((r) => setTimeout(r, 20))
-    // 导入已解包完毕,但热切换段被锁挡住,还没 pause
-    expect(calls).toEqual(['pause-start'])
+    expect(repo.getHost(deps.db, other.id)!.enabled).toBe(1)
 
     release()
-    expect((await pAct).status).toBe(200)
     expect((await pImp).status).toBe(200)
-    expect(calls).toEqual(['pause-start', 'pause-end', 'resume', 'pause-start', 'pause-end', 'resume'])
+    // 导入把整库换掉;disable 排到执行时 deps.db 已指向新库,other 的旧 id 是否仍对应
+    // 一台主机取决于新库自增序列是否巧合重叠,不是本用例要证明的东西——真正的证据
+    // 是上面那条 release() 之前的断言(disable 没有抢在导入前面执行)。这里只确认
+    // disable 干净地跑完了临界区(不是因为锁失效而崩在中途)
+    expect([200, 404]).toContain((await pDis).status)
+    expect(calls).toEqual(['pause-start', 'pause-end', 'resume'])
   }, 20000)
 
   it('导入含 hosts 表的库后,按其 active 主机重建连接', async () => {

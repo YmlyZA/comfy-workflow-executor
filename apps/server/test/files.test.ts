@@ -122,7 +122,7 @@ describe('zip download', () => {
   function seedBatchWithOutputs() {
     const t = repo.createTemplate(db, { name: 'T', comfyJson: {}, params: [] })
     const b = repo.createBatch(db, t.id, { name: '批次一', jobs: [{}] })
-    const claimed = repo.claimNextJob(db)!
+    const claimed = repo.claimNextJob(db, 1)!
     mkdirSync(join(dataDir, 'outputs', String(b.id)), { recursive: true })
     writeFileSync(join(dataDir, 'outputs', String(b.id), '0-0-out.png'), 'real-bytes')
     writeFileSync(join(dataDir, 'outputs', String(b.id), 'orphan.png'), 'orphan-bytes')

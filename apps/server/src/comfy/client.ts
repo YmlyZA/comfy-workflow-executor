@@ -104,7 +104,9 @@ export function createComfyClient(baseUrl: string): ComfyClient {
     },
 
     async interrupt() {
-      await fetch(`${http}/interrupt`, { method: 'POST' })
+      // 与 isUp/cwePing 同档:控制类小请求,预期秒级内有响应;不设超时的话,
+      // 主机不可达/卡死时 undici 默认要等 10s~300s,会拖垮批量取消的并发上限
+      await fetch(`${http}/interrupt`, { method: 'POST', signal: AbortSignal.timeout(3000) })
     },
 
     async uploadImage(filePath: string) {

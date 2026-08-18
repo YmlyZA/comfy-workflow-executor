@@ -3,12 +3,13 @@ import { existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { serve } from '@hono/node-server'
 import { serveStatic } from '@hono/node-server/serve-static'
+import type { AppDeps } from './app.js'
 import { createApp } from './app.js'
 import { createComfyClient } from './comfy/client.js'
 import { loadConfig } from './config.js'
 import { createDb } from './db/index.js'
 import { ensureActiveHost } from './db/repo.js'
-import { Executor } from './executor.js'
+import { ExecutorPool } from './executor-pool.js'
 import { startHostMonitor } from './host-monitor.js'
 
 const config = loadConfig()
@@ -20,7 +21,7 @@ const activeHost = ensureActiveHost(db, config.comfyUrl)
 const events = new EventEmitter()
 const comfy = createComfyClient(activeHost.url)
 // deps 对象与 app/executor/monitor 共享:热切换靠替换 deps.db / deps.comfy
-const deps = { config, db, comfy, events, executor: null as Executor | null }
+const deps: AppDeps = { config, db, comfy, events, executor: null }
 const app = createApp(deps)
 
 if (existsSync('./public')) {
@@ -28,11 +29,16 @@ if (existsSync('./public')) {
   app.get('/*', serveStatic({ path: './public/index.html' })) // SPA fallback
 }
 
-const executor = new Executor({ db, comfy, events, dataDir: config.dataDir })
-deps.executor = executor
-executor.start()
-startHostMonitor(deps)
+// 每台 enabled 主机一个 worker;先收无主的 running job,再按 hosts 表对齐 worker 集合
+const pool = new ExecutorPool({ db, events, dataDir: config.dataDir, comfyFactory: createComfyClient })
+pool.reclaimOrphans()
+pool.syncFromDb()
+deps.executor = pool
+// getDb 读同一个 deps 对象:数据导入换库时改的是 deps.db,不是这里的局部变量 db
+deps.hostMonitor = startHostMonitor({ getDb: () => deps.db, events, comfyFactory: createComfyClient })
 
 serve({ fetch: app.fetch, port: config.port }, (info) => {
-  console.log(`comfy-workflow-executor listening on :${info.port} → ${activeHost.name} (${activeHost.url})`)
+  console.log(
+    `comfy-workflow-executor listening on :${info.port} → 参考主机 ${activeHost.name}，${pool.size()} 台主机参与调度`,
+  )
 })

@@ -86,7 +86,19 @@ export interface HostDto {
   name: string
   url: string
   note: string | null
+  /** 参考主机(只服务查询),不再决定谁干活 */
   active: number
+  /** 参与调度:为 1 才会起 worker */
+  enabled: number
+  kind: 'resident' | 'rental'
+  rentedAt: string | null
+  hourlyRate: number | null
+  /** 自动停用原因(熔断) */
+  disabledReason: string | null
+  /** 来自服务端 monitor 缓存;null = 尚未探测过 */
+  online: boolean | null
+  /** 锁定到该主机的未完成批次数 */
+  pinnedBatches: number
   createdAt: string
 }
 
@@ -119,17 +131,38 @@ export interface HealthDto {
 
 export const fetchHosts = () => api<{ hosts: HostDto[] }>('/hosts')
 
-export const createHost = (input: { name: string; url: string; note?: string | null }) =>
+export interface HostWritable {
+  name: string
+  url: string
+  note?: string | null
+  kind?: 'resident' | 'rental'
+  rentedAt?: string | null
+  hourlyRate?: number | null
+}
+
+export const createHost = (input: HostWritable) =>
   api<{ host: HostDto }>('/hosts', { method: 'POST', body: JSON.stringify(input) })
 
 /** note 传 null 表示清空备注(传 undefined 会被 JSON 丢键,服务端保留原值) */
-export const updateHost = (id: number, patch: { name?: string; url?: string; note?: string | null }) =>
+export const updateHost = (id: number, patch: Partial<HostWritable> & { enabled?: true }) =>
   api<{ host: HostDto }>(`/hosts/${id}`, { method: 'PATCH', body: JSON.stringify(patch) })
 
 export const deleteHost = (id: number) => api<{ ok: true }>(`/hosts/${id}`, { method: 'DELETE' })
 
-export const activateHost = (id: number, mode: 'wait' | 'interrupt') =>
-  api<{ host: HostDto }>(`/hosts/${id}/activate`, { method: 'POST', body: JSON.stringify({ mode }) })
+/** 设为参考主机。不影响任何 worker,故无需模式选择 */
+export const activateHost = (id: number) =>
+  api<{ host: HostDto }>(`/hosts/${id}/activate`, { method: 'POST' })
+
+/** 停用调度。wait=等当前任务跑完;interrupt=放弃并重排到其他主机 */
+export const disableHost = (id: number, mode: 'wait' | 'interrupt') =>
+  api<{ host: HostDto }>(`/hosts/${id}/disable`, {
+    method: 'POST',
+    body: JSON.stringify({ mode }),
+  })
+
+export const enableHost = (id: number) => updateHost(id, { enabled: true })
+
+export const fetchHostStatsById = (id: number) => api<HostStatsDto>(`/hosts/${id}/stats`)
 
 export const testHost = (id: number) =>
   api<HostTestResult>(`/hosts/${id}/test`, { method: 'POST', body: JSON.stringify({}) })

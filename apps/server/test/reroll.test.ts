@@ -35,7 +35,7 @@ function makeTemplate(params: Array<typeof seedParam | typeof promptParam>) {
 /** 用 repo 层把队列里的 pending 任务全部跑成 succeeded */
 function succeedAll() {
   for (;;) {
-    const claimed = repo.claimNextJob(db)
+    const claimed = repo.claimNextJob(db, 1)
     if (!claimed) break
     repo.finishJob(db, claimed.job.id, [])
     repo.markBatchCompletedIfDone(db, claimed.job.batchId)
@@ -107,7 +107,7 @@ describe('POST /api/batches/:id/jobs/:jobId/reroll', () => {
   it('非 succeeded job 返回 400(failed 与 pending)', async () => {
     const t = makeTemplate([seedParam])
     const b = repo.createBatch(db, t.id, { name: 'B', jobs: [{ seed: 1 }, { seed: 2 }] })
-    const claimed = repo.claimNextJob(db)!
+    const claimed = repo.claimNextJob(db, 1)!
     repo.failJob(db, claimed.job.id, 'boom')
     const jobsNow = repo.getBatchDetail(db, b.id)!.jobs
     const failedJob = jobsNow.find((j) => j.status === 'failed')!
